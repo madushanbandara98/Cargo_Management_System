@@ -17,29 +17,22 @@ public class LoginPage extends JFrame {
     private JLabel logo;
     private ImageIcon logoIcon;
 
-    private final String baseDir = "D:\\Cargo";
+    //private final String baseDir = "D:\\Cargo";
 
     public LoginPage() {
-        super("ACM Login");
+        super("MCM Login");
         AppIcon.setIcon(this); // your custom icon
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        int width = screen.width / 2;
-        int height = screen.height / 2;
-        setSize(width, height);
-        setLocationRelativeTo(null); // center
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
+        setLocationRelativeTo(null);
 
-        ensureBaseDir();
+
         ensureAdminUser(); // first-time setup
         Database db = new Database();
         initUI();
     }
 
-    private void ensureBaseDir() {
-        File f = new File(baseDir);
-        if (!f.exists()) f.mkdirs();
-    }
 
     private void makeEnterKeyMoveFocus(JComponent comp, JButton onLastFieldAction) {
         comp.getInputMap(JComponent.WHEN_FOCUSED)
@@ -100,7 +93,7 @@ public class LoginPage extends JFrame {
 
         logo = new JLabel();
         logo.setAlignmentX(Component.CENTER_ALIGNMENT);
-        logoIcon = new ImageIcon(getClass().getResource("/MyLogo.png"));
+        logoIcon = new ImageIcon(getClass().getResource(""));
 
         leftPanel.add(Box.createVerticalGlue());
         leftPanel.add(welcome);

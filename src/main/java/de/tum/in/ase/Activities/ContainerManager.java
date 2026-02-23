@@ -9,7 +9,10 @@ import java.util.List;
  * Stores one full path per line in: D:\Cargo\containers.txt
  */
 public class ContainerManager {
-    private static final File CONTAINERS_FILE = new File("D:\\Cargo", "containers.txt");
+
+    private static final String APP_DIR =
+            System.getProperty("user.home") + File.separator + ".acm";
+    private static final File CONTAINERS_FILE = new File(APP_DIR, "containers.txt");
 
     public static List<String> loadContainers() {
         List<String> out = new ArrayList<>();

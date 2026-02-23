@@ -34,7 +34,7 @@ public class MainDashboard extends JFrame {
 
         AppIcon.setIcon(this);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(900, 500);
+        setExtendedState(JFrame.MAXIMIZED_BOTH); // FULL SCREEN
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
 
@@ -72,7 +72,7 @@ public class MainDashboard extends JFrame {
         // --------- Menu buttons ----------
         JButton btnCurrent = createSidebarButton("Ongoing Shipment");
         JButton btnNewContainer = createSidebarButton("New Shipment");
-        JButton btnScanBarcode = createSidebarButton("Scan Barcode / QR");
+        JButton btnScanBarcode = createSidebarButton("Scan Barcode");
         JButton btnSettings = createSidebarButton("Settings");
         JButton btnExit = createSidebarButton("Exit");
 
@@ -138,7 +138,7 @@ public class MainDashboard extends JFrame {
     }
 
     private void showWelcomePanel() {
-        JLabel label = new JLabel("<html><h2>Welcome to ABC Cargo Management</h2>"
+        JLabel label = new JLabel("<html><h2>Welcome to MCM Cargo Management</h2>"
                 + "<p>Select an option from the left menu.</p></html>", SwingConstants.CENTER);
         contentPanel.removeAll();
         contentPanel.add(label, BorderLayout.CENTER);

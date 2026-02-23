@@ -35,9 +35,9 @@ public class InvoicePreviewFrame extends JFrame {
 
             // --- Header ---
             Paragraph header = new Paragraph()
-                    .add(new Text("Asanka Cargo Service\n").setBold().setFontSize(18))
+                    .add(new Text("Madushan Cargo Service\n").setBold().setFontSize(18))
                     .add(new Text("Transport goods from Germany to Sri Lanka\n").setFontSize(14))
-                    .add(new Text("TP: +491726998031 / +94760265106\n").setFontSize(12))
+                    .add(new Text("TP: +4912345678 / +94123456789\n").setFontSize(12))
                     .setTextAlignment(TextAlignment.CENTER);
             document.add(header);
 

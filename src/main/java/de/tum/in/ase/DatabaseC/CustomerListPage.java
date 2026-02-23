@@ -166,8 +166,15 @@ public class CustomerListPage extends JFrame {
                 "Enter your password to confirm deletion:");
         if (password == null || password.trim().isEmpty()) return;
 
-        // Validate against currently logged-in user in MainDashboard
-        if (!UserStore.validate(MainDashboard.getCurrentUsername(), password)) {
+        // Find the currently logged-in user from DB based on session or default admin
+        String currentUser = MainDashboard.getCurrentUsername();
+        if (currentUser == null || currentUser.isEmpty()) {
+            // fallback to default admin
+            currentUser = "admin";
+        }
+
+        // Validate password
+        if (!UserStore.validate(currentUser, password)) {
             JOptionPane.showMessageDialog(this,
                     "Wrong password! Action cancelled.",
                     "Error", JOptionPane.ERROR_MESSAGE);
@@ -178,25 +185,15 @@ public class CustomerListPage extends JFrame {
                 "Are you sure you want to delete ALL customers?",
                 "Confirm Delete All",
                 JOptionPane.YES_NO_OPTION);
-
         if (confirm != JOptionPane.YES_OPTION) return;
 
-        try (Connection c = Database.getConnection();
-             Statement st = c.createStatement()) {
+        Database.deleteAllCustomers();
 
-            // delete all items first
-            st.executeUpdate("DELETE FROM customer_items");
-
-            // delete all customers
-            st.executeUpdate("DELETE FROM customers");
-
-            JOptionPane.showMessageDialog(this, "All customers deleted successfully!");
-            loadCustomers(); // refresh table
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "DB Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        JOptionPane.showMessageDialog(this, "All customers deleted successfully!");
+        loadCustomers(); // refresh table
     }
+
+
 
 
 

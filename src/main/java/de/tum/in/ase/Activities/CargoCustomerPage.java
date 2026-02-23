@@ -69,7 +69,7 @@ public class CargoCustomerPage extends JFrame {
         super("ACM Customer Page");
         AppIcon.setIcon(this);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
-        setSize(1100, 760);
+        setExtendedState(JFrame.MAXIMIZED_BOTH); // FULL SCREEN
         setLocationRelativeTo(null);
         this.activeContainerPath = containerPath;
         this.username = username;
@@ -86,7 +86,7 @@ public class CargoCustomerPage extends JFrame {
         header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
         header.setBackground(Color.YELLOW);
 
-        JLabel lblCompany = new JLabel("Asanka Cargo Service", SwingConstants.CENTER);
+        JLabel lblCompany = new JLabel("Madushan Cargo Service", SwingConstants.CENTER);
         lblCompany.setFont(new Font("Arial", Font.BOLD, 18));
 
         // Customer Ref Line
@@ -167,6 +167,16 @@ public class CargoCustomerPage extends JFrame {
         gbcRef.gridx = 1;
         tfSpecialPrice = new JTextField(20);
         addrLine.add(tfSpecialPrice, gbcRef);
+
+        gbcAddr.gridx = 3;
+        gbcAddr.gridy = 2;
+        gbcAddr.gridheight = 2;
+        gbcAddr.anchor = GridBagConstraints.NORTHEAST;
+        gbcAddr.insets = new Insets(15, 6, 6, 40);
+        gbcAddr.fill = GridBagConstraints.NONE;
+
+        addrLine.add(createCalculatorButton(), gbcAddr);
+        gbcAddr.gridheight = 1;
 
 
         gbcRef.gridx = 0; gbcRef.gridy = 3;
@@ -325,7 +335,7 @@ public class CargoCustomerPage extends JFrame {
 
     private void setupEnterNavigation() {
         // Customer Fields navigation
-        JComponent[] customerFields = {tfCustomerRef, tfCustomerName, tfCustomerID, tfGermanAddress, tfDePhone, tfSriLankanAddress, tfLkPhone, tfSpecialPrice};
+        JComponent[] customerFields = {tfCustomerRef, tfCustomerName, tfCustomerID, tfGermanAddress, tfDePhone, tfSriLankanAddress, tfLkPhone, tfSpecialPrice, tfDeliveryCharge};
         for (int i = 0; i < customerFields.length; i++) {
             final int index = i;
             JComponent comp = customerFields[i];
@@ -582,9 +592,9 @@ public class CargoCustomerPage extends JFrame {
 
             // ----------- Header & Date/Time -------------
             Paragraph header = new Paragraph()
-                    .add(new com.itextpdf.layout.element.Text("Asanka Cargo Service\n").setBold().setFontSize(18))
+                    .add(new com.itextpdf.layout.element.Text("Madushan Cargo Service\n").setBold().setFontSize(18))
                     .add(new com.itextpdf.layout.element.Text("Transport goods from Germany to Sri Lanka\n").setFontSize(14))
-                    .add(new com.itextpdf.layout.element.Text("TP:+491726998031/+94760265106\n").setFontSize(12))
+                    .add(new com.itextpdf.layout.element.Text("TP:+4912345678/+9412345678\n").setFontSize(12))
                     .setTextAlignment(TextAlignment.CENTER);
             document.add(header);
             // ----------- Small barcode in header (left) -------------
@@ -1015,6 +1025,82 @@ public class CargoCustomerPage extends JFrame {
     private void syncDelivery() {
         String val = tfDeliveryCharge.getText().trim();
         tfDeliveryChargeTotal.setText(val);
+    }
+
+
+    private void openFloatingCalculator() {
+        VolumeCalculatorDialog calc = new VolumeCalculatorDialog(this);
+        calc.setLocationRelativeTo(this);
+        calc.setVisible(true);
+    }
+
+    private JButton createCalculatorButton() {
+        // ===== CONFIGURATION =====
+        // Icon size (adjust these values)
+        final int ICON_WIDTH = 38;
+        final int ICON_HEIGHT = 38;
+
+        // Button size (adjust these values)
+        final int BUTTON_WIDTH = 38;
+        final int BUTTON_HEIGHT = 34;
+
+        // Border color for hover effect (optional - set to null if you want no border)
+        final Color BORDER_COLOR = new Color(200, 150, 0);
+        // ========================
+
+        JButton btnCalc = new JButton();
+        btnCalc.setToolTipText("Open Volume Calculator");
+
+        // Load calculator icon from resources
+        try {
+            java.net.URL iconURL = getClass().getResource("/calculator.png");
+            if (iconURL != null) {
+                javax.swing.ImageIcon icon = new javax.swing.ImageIcon(iconURL);
+                // Scale icon to configured size
+                java.awt.Image scaledImage = icon.getImage().getScaledInstance(
+                        ICON_WIDTH, ICON_HEIGHT, java.awt.Image.SCALE_SMOOTH
+                );
+                btnCalc.setIcon(new javax.swing.ImageIcon(scaledImage));
+            } else {
+                // Fallback if image not found
+                btnCalc.setText("🧮");
+                btnCalc.setFont(new Font("Segoe UI", Font.PLAIN, ICON_HEIGHT - 4));
+            }
+        } catch (Exception e) {
+            // Fallback if loading fails
+            btnCalc.setText("🧮");
+            btnCalc.setFont(new Font("Segoe UI", Font.PLAIN, ICON_HEIGHT - 4));
+        }
+
+        // Set button size
+        btnCalc.setPreferredSize(new Dimension(BUTTON_WIDTH, BUTTON_HEIGHT));
+        btnCalc.setFocusPainted(false);
+        btnCalc.setBorderPainted(false);           // No border initially
+        btnCalc.setContentAreaFilled(false);        // No background fill
+        btnCalc.setOpaque(false);                 // Transparent background
+        btnCalc.setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+        // Add hover effect - only border, no background color
+        btnCalc.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                btnCalc.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 2));
+            }
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                btnCalc.setBorderPainted(false);
+            }
+        });
+
+        btnCalc.addActionListener(e -> openFloatingCalculator());
+
+        return btnCalc;
+    }
+
+    public void setDimensionsFromCalculator(String h, String w, String d) {
+        tfHeight.setText(h);
+        tfWidth.setText(w);
+        tfDepth.setText(d);
     }
 
 

@@ -24,7 +24,10 @@ public class CreateContainerPage extends JDialog {
     private JLabel lblPath;
     private String selectedPath;
 
-    private final File activeContainerFile = new File("D:\\Cargo", "container_path.txt");
+    private static final String APP_DIR =
+            System.getProperty("user.home") + File.separator + ".acm";
+
+    private final File activeContainerFile = new File(APP_DIR, "container_path.txt");
 
     public CreateContainerPage(Frame owner) {
         super(owner, "Create New Container", true);

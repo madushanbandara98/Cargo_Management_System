@@ -15,7 +15,7 @@ public class ScanCustomerFrame extends JFrame {
     private JButton btnLoad;
 
     public ScanCustomerFrame() {
-        setTitle("Scan Customer");
+        setTitle("Scan Barcode");
         setSize(500, 150);
         setLocationRelativeTo(null);
         setLayout(new FlowLayout());
