@@ -170,15 +170,3 @@ ACM/
 ├─ ACM\_System.jar                 # Compiled executable
 
 └─ README.md
-
-
-
-👨‍💻 About the Developer
-
-
-
-* I am a full-stack Java desktop application developer with expertise in:
-* Secure offline/online application development
-* Database design \& management
-* PDF automation and barcode integration
-* Modular, scalable software architecture
