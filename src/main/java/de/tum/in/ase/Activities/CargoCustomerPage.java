@@ -101,10 +101,10 @@ public class CargoCustomerPage extends JFrame {
         gbcRef.gridx = 1;
         tfCustomerRef = new JTextField(12);
         refLine.add(tfCustomerRef, gbcRef);
-// ✅ ENTER key
+// ENTER key
         tfCustomerRef.addActionListener(e -> checkCustomerRef());
 
-// ✅ Click away / TAB
+// Click away / TAB
         tfCustomerRef.addFocusListener(new FocusAdapter() {
             @Override
             public void focusLost(FocusEvent e) {
@@ -112,7 +112,7 @@ public class CargoCustomerPage extends JFrame {
             }
         });
 
-        // ✅ Document listener (reset flag when text changes)
+        //  Document listener (reset flag when text changes)
         tfCustomerRef.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) { customerRefChecked = false; }
             public void removeUpdate(DocumentEvent e) { customerRefChecked = false; }
@@ -504,7 +504,7 @@ public class CargoCustomerPage extends JFrame {
         editingCustomerRef = null;
     }
 
-    // ----------------- PDF saving methods (keep your original code) -----------------
+    // ----------------- PDF saving methods  -----------------
     private boolean isDuplicateReference(String customerRef) {
         String folderPath;
         if (activeContainerPath != null && !activeContainerPath.isEmpty()) folderPath = activeContainerPath;
@@ -887,7 +887,7 @@ public class CargoCustomerPage extends JFrame {
                                        String germanAddress, String sriLankanAddress, String phoneDE,
                                        String phoneLK, double totalCubic, int totalItems, double totalAmount, double deliveryCharge, Double specialPrice) {
 
-        // --- 1️⃣ Fill customer details ---
+        // --- Fill customer details ---
         tfCustomerRef.setText(customerRef);
         tfCustomerName.setText(customerName);
         tfCustomerID.setText(customerID);
@@ -905,7 +905,7 @@ public class CargoCustomerPage extends JFrame {
 
         tfSpecialPrice.setText(String.format("%.2f", priceToShow));
 
-        // --- 2️⃣ Load table items from DB ---
+        // ---  Load table items from DB ---
         tableModel.setRowCount(0); // clear previous rows
         try (Connection c = Database.getConnection();
              PreparedStatement ps = c.prepareStatement("SELECT * FROM customer_items WHERE customerRef = ?")) {
@@ -929,10 +929,10 @@ public class CargoCustomerPage extends JFrame {
             JOptionPane.showMessageDialog(this, "Error loading table items: " + e.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
         }
 
-        // --- 3️⃣ Recalculate totals ---
+        // ---  Recalculate totals ---
         updateTotals();
 
-        // --- 4️⃣ Set editing state ---
+        // ---  Set editing state ---
         editingCustomerRef = customerRef;
     }
 
@@ -957,7 +957,7 @@ public class CargoCustomerPage extends JFrame {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                // ✅ Existing customer found
+                //  Existing customer found
                 tfCustomerName.setText(rs.getString("customerName"));
                 tfCustomerID.setText(rs.getString("customerID"));
                 tfGermanAddress.setText(rs.getString("germanAddress"));
@@ -974,7 +974,7 @@ public class CargoCustomerPage extends JFrame {
                 editingCustomerRef = null;
 
             } else {
-                // ❌ Customer NOT found
+                //  Customer NOT found
                 JOptionPane.showMessageDialog(this,
                         "No customer found with reference:\n" + customerRef +
                                 "\n\nYou can continue by entering new customer details.",
@@ -1036,15 +1036,15 @@ public class CargoCustomerPage extends JFrame {
 
     private JButton createCalculatorButton() {
         // ===== CONFIGURATION =====
-        // Icon size (adjust these values)
+        // Icon size
         final int ICON_WIDTH = 38;
         final int ICON_HEIGHT = 38;
 
-        // Button size (adjust these values)
+        // Button size
         final int BUTTON_WIDTH = 38;
         final int BUTTON_HEIGHT = 34;
 
-        // Border color for hover effect (optional - set to null if you want no border)
+        // Border color for hover effect
         final Color BORDER_COLOR = new Color(200, 150, 0);
         // ========================
 
