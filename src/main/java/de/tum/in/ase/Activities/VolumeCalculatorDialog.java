@@ -83,7 +83,7 @@ public class VolumeCalculatorDialog extends JDialog {
         gbc.gridx = 1;
         panel.add(sendBtn, gbc);
 
-        // LOGIC (YOUR SAME LOGIC)
+        // LOGIC
         calculateBtn.addActionListener(e -> {
             try {
                 double price = Double.parseDouble(priceField.getText());
