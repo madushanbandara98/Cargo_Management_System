@@ -20,7 +20,7 @@ const containerSchema = new Schema({
   sqliteId: sourceId,
   name: { type: String, required: true },
   reference: { type: String, required: true, unique: true },
-  status: { type: String, required: true, enum: ['OPEN', 'ARCHIVED'] },
+  status: { type: String, required: true, enum: ['OPEN', 'ACTIVE', 'ARCHIVED'] },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   createdAt: { type: Date, required: true }
 }, { versionKey: false });

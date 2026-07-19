@@ -103,8 +103,22 @@ function setActiveNavigation(id) {
 async function loadShipments() {
   const shipments = await api('/api/shipments'); const list = document.querySelector('#shipment-list');
   const createdDate = value => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
-  list.innerHTML = shipments.length ? shipments.map(s => `<article class="card shipment"><div><h3>${escapeHtml(s.name)}</h3><p>Created ${createdDate(s.created_at)} · ${s.consignment_count} ${s.consignment_count === 1 ? 'customer' : 'customers'}</p></div><div class="shipment-actions"><button data-open-id="${s.id}">Open</button>${currentUser?.role === 'ADMIN' ? `<button class="shipment-delete" data-delete-id="${s.id}" data-shipment-name="${escapeHtml(s.name)}">Delete</button>` : ''}</div></article>`).join('') : '<p>No shipments yet. Create your first shipment.</p>';
+  list.innerHTML = shipments.length ? shipments.map(s => `<article class="card shipment"><div><h3>${escapeHtml(s.name)}</h3><p>Created ${createdDate(s.created_at)} · ${s.consignment_count} ${s.consignment_count === 1 ? 'customer' : 'customers'}${currentUser?.role === 'ADMIN' ? ` · ${s.status === 'ACTIVE' ? 'Active' : 'Not active'}` : ''}</p></div><div class="shipment-actions"><button data-open-id="${s.id}">Open</button>${currentUser?.role === 'ADMIN' ? `<button class="shipment-activation ${s.status === 'ACTIVE' ? 'is-active' : ''}" data-status-id="${s.id}" data-next-status="${s.status === 'ACTIVE' ? 'OPEN' : 'ACTIVE'}">${s.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button><button class="shipment-delete" data-delete-id="${s.id}" data-shipment-name="${escapeHtml(s.name)}">Delete</button>` : ''}</div></article>`).join('') : `<p>${currentUser?.role === 'ADMIN' ? 'No shipments yet. Create your first shipment.' : 'No active shipments are available.'}</p>`;
   list.querySelectorAll('[data-open-id]').forEach(button => button.onclick = () => openShipment(shipments.find(s => s.id === button.dataset.openId)));
+  list.querySelectorAll('[data-status-id]').forEach(button => button.onclick = async () => {
+    const activating = button.dataset.nextStatus === 'ACTIVE';
+    button.disabled = true;
+    button.textContent = activating ? 'Activating…' : 'Deactivating…';
+    try {
+      await api(`/api/shipments/${button.dataset.statusId}/status`, { method: 'PATCH', body: JSON.stringify({ status: button.dataset.nextStatus }) });
+      showToast(`Shipment ${activating ? 'activated' : 'deactivated'}.`);
+      await loadShipments();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = activating ? 'Activate' : 'Deactivate';
+      message(list, error.message);
+    }
+  });
   list.querySelectorAll('[data-delete-id]').forEach(button => button.onclick = () => showDeleteShipmentDialog({ id: button.dataset.deleteId, name: button.dataset.shipmentName }));
 }
 

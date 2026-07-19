@@ -207,7 +207,8 @@ app.delete('/api/employees/:id', requireAuth, requireAdmin, async (req, res) => 
 });
 
 app.get('/api/shipments', requireAuth, async (req, res) => {
-  const shipments = await Container.find().sort({ createdAt: -1 }).lean();
+  const filter = req.user.role === 'ADMIN' ? {} : { status: 'ACTIVE' };
+  const shipments = await Container.find(filter).sort({ createdAt: -1 }).lean();
   const counts = await Consignment.aggregate([{ $group: { _id: '$container', count: { $sum: 1 } } }]);
   const countMap = new Map(counts.map(row => [row._id.toString(), row.count]));
   res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
@@ -228,6 +229,25 @@ app.post('/api/shipments', requireAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'Shipment reference already exists.' : error.message });
   }
+});
+
+app.patch('/api/shipments/:id/status', requireAuth, requireAdmin, async (req, res) => {
+  const status = text(req.body.status, 'Shipment status', { required: true }).toUpperCase();
+  if (!['OPEN', 'ACTIVE'].includes(status)) {
+    return res.status(400).json({ error: 'Shipment status must be OPEN or ACTIVE.' });
+  }
+  const shipment = await Container.findByIdAndUpdate(
+    req.params.id,
+    { status },
+    { new: true, runValidators: true }
+  );
+  if (!shipment) return res.status(404).json({ error: 'Shipment not found.' });
+  const consignmentCount = await Consignment.countDocuments({ container: shipment._id });
+  res.json({
+    id: shipment._id.toString(), name: shipment.name, reference: shipment.reference,
+    status: shipment.status, created_at: shipment.createdAt,
+    created_by: shipment.createdBy.toString(), consignment_count: consignmentCount
+  });
 });
 
 app.delete('/api/shipments/:id', requireAuth, requireAdmin, async (req, res) => {
@@ -258,6 +278,10 @@ app.delete('/api/shipments/:id', requireAuth, requireAdmin, async (req, res) => 
 });
 
 app.get('/api/shipments/:shipmentId/consignments', requireAuth, async (req, res) => {
+  const shipment = await Container.findById(req.params.shipmentId).lean();
+  if (!shipment || (req.user.role !== 'ADMIN' && shipment.status !== 'ACTIVE')) {
+    return res.status(404).json({ error: 'Shipment not found.' });
+  }
   const rows = await Consignment.find({ container: req.params.shipmentId }).populate('customer deliveredBy').sort({ deliveryStatus: -1, updatedAt: -1 }).lean();
   res.json(rows.map(row => ({
     id: row._id.toString(), customer_ref: row.customer.customerRef, customer_name: row.customer.name,
@@ -273,6 +297,9 @@ app.patch('/api/consignments/:id/delivery-status', requireAuth, async (req, res)
   if (requestedStatus === 'PENDING' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Only an administrator can reopen a delivered customer.' });
   const consignment = await Consignment.findById(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
+  if (req.user.role !== 'ADMIN' && !await Container.exists({ _id: consignment.container, status: 'ACTIVE' })) {
+    return res.status(404).json({ error: 'Customer delivery not found.' });
+  }
   if (requestedStatus === 'DELIVERED' && consignment.deliveryStatus === 'DELIVERED') {
     return res.json(await presentConsignment(consignment._id));
   }
@@ -323,6 +350,9 @@ app.get('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) => 
 app.get('/api/consignments/:id/delivery-sheet', requireAuth, async (req, res) => {
   const consignment = await presentConsignment(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
+  if (req.user.role !== 'ADMIN' && !await Container.exists({ _id: consignment.shipment_id, status: 'ACTIVE' })) {
+    return res.status(404).json({ error: 'Customer delivery not found.' });
+  }
   res.json({ id: consignment.id, deliveryStatus: consignment.delivery_status, deliveredAt: consignment.delivered_at, deliveredBy: consignment.delivered_by, customer: { name: consignment.customer_name, reference: consignment.customer_ref, address: consignment.sri_lankan_address || consignment.german_address }, totalItems: consignment.total_items, items: consignment.items.map(item => ({ description: item.description, height: item.height_cm, width: item.width_cm, depth: item.depth_cm, quantity: item.quantity })) });
 });
 

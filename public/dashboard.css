@@ -155,6 +155,10 @@
 .shipment p { color: var(--dash-muted); font-size: .82rem; }
 .shipment p::first-letter { text-transform: uppercase; }
 .shipment-actions { display: flex; align-items: center; gap: .55rem; }
+.shipment-activation { color: #fff; border: 1px solid #11734c; background: #16875b !important; }
+.shipment-activation:hover { border-color: #0b603e; background: #10734c !important; }
+.shipment-activation.is-active { color: #11734c; background: #ecf8f2 !important; }
+.shipment-activation.is-active:hover { color: #fff; background: #10734c !important; }
 .shipment-delete { color: #a62922; border: 1px solid #f1c9c5; background: #fff !important; }
 .shipment-delete:hover { color: #861c16; background: #fff1f0 !important; border-color: #e9aaa5; }
 .confirm-dialog { width: min(430px, calc(100% - 2rem)); padding: 0; border: 0; border-radius: 16px; color: var(--dash-ink); background: #fff; box-shadow: 0 24px 70px rgba(16,24,40,.25); }
