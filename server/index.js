@@ -7,11 +7,11 @@ import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
 import PDFDocument from 'pdfkit';
 import { connectMongo } from './mongo/connection.js';
-import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, ShipmentTracking, nextMongoSourceId } from './mongo/models.js';
+import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, Payment, ShipmentTracking, nextMongoSourceId } from './mongo/models.js';
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json());
+app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
 app.use(async (req, res, next) => {
   try {
@@ -30,7 +30,13 @@ function publicUser(user) {
   return {
     id: user._id.toString(), username: user.username, role: user.role,
     full_name: user.fullName, business_name: user.businessName, phone: user.phone,
-    email: user.email, business_address: user.businessAddress
+    business_tagline: user.businessTagline, registration_number: user.registrationNumber,
+    vat_number: user.vatNumber, business_logo: user.businessLogo,
+    phone_sri_lanka: user.phoneSriLanka, email: user.email, website: user.website,
+    business_address: user.businessAddress, sri_lankan_address: user.sriLankanAddress,
+    default_currency: user.defaultCurrency, invoice_prefix: user.invoicePrefix,
+    payment_terms_days: user.paymentTermsDays, invoice_accent_color: user.invoiceAccentColor,
+    bank_name: user.bankName, account_holder: user.accountHolder, iban: user.iban, bic: user.bic
   };
 }
 
@@ -113,6 +119,11 @@ async function presentConsignment(id) {
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const totalCubic = items.reduce((sum, item) => sum + (item.height_cm * item.width_cm * item.depth_cm / 1_000_000 * item.quantity), 0);
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+  const finalTotal = Number((totalAmount + summary.deliveryCharge).toFixed(2));
+  const payments = await Payment.find({ consignment: summary._id }).populate('recordedBy voidedBy', 'username fullName').sort({ paymentDate: -1, createdAt: -1 }).lean();
+  const amountPaid = Number(payments.filter(payment => payment.status !== 'VOID').reduce((sum, payment) => sum + payment.amount, 0).toFixed(2));
+  const balanceDue = Number(Math.max(0, finalTotal - amountPaid).toFixed(2));
+  const paymentStatus = amountPaid <= 0 ? 'UNPAID' : balanceDue > 0 ? 'PARTIALLY_PAID' : 'PAID';
   return {
     id: summary._id.toString(), shipment_id: summary.container._id.toString(), customer_id: summary.customer._id.toString(),
     rate_per_cubic: summary.ratePerCubic, delivery_charge: summary.deliveryCharge,
@@ -125,7 +136,9 @@ async function presentConsignment(id) {
     customer_identity: summary.customer.identityNumber, german_address: summary.customer.germanAddress,
     sri_lankan_address: summary.customer.sriLankanAddress, phone_de: summary.customer.phoneDE,
     phone_lk: summary.customer.phoneLK, total_cubic: Number(totalCubic.toFixed(3)), total_items: totalItems,
-    items, total_amount: Number(totalAmount.toFixed(2)), final_total: Number((totalAmount + summary.deliveryCharge).toFixed(2))
+    items, total_amount: Number(totalAmount.toFixed(2)), final_total: finalTotal,
+    payment_status: paymentStatus, amount_paid: amountPaid, balance_due: balanceDue,
+    payments: payments.map(payment => ({ id: payment._id.toString(), amount: payment.amount, method: payment.method, payment_date: payment.paymentDate, reference: payment.reference, notes: payment.notes, status: payment.status || 'ACTIVE', recorded_by: payment.recordedBy ? (payment.recordedBy.fullName || payment.recordedBy.username) : '', voided_by: payment.voidedBy ? (payment.voidedBy.fullName || payment.voidedBy.username) : '', voided_at: payment.voidedAt, void_reason: payment.voidReason, created_at: payment.createdAt }))
   };
 }
 
@@ -190,12 +203,34 @@ app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }))
 app.put('/api/profile', requireAuth, requireAdmin, async (req, res) => {
   try {
     const username = text(req.body.username, 'Username', { required: true });
+    const logo = String(req.body.businessLogo ?? '');
+    if (logo && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo)) throw new Error('Logo must be a PNG or JPG image.');
+    if (logo.length > 2_800_000) throw new Error('Logo must be no larger than 2 MB.');
+    const accentColor = text(req.body.invoiceAccentColor, 'Invoice accent colour') || '#0D2B45';
+    if (!/^#[0-9A-F]{6}$/i.test(accentColor)) throw new Error('Select a valid invoice accent colour.');
+    const paymentTermsDays = number(req.body.paymentTermsDays ?? 14, 'Payment terms', { min: 0, integer: true });
+    if (paymentTermsDays > 365) throw new Error('Payment terms cannot exceed 365 days.');
     const profile = {
       fullName: text(req.body.fullName, 'Full name'),
       businessName: text(req.body.businessName, 'Business name'),
+      businessTagline: text(req.body.businessTagline, 'Business tagline'),
+      registrationNumber: text(req.body.registrationNumber, 'Registration number'),
+      vatNumber: text(req.body.vatNumber, 'Tax / VAT number'),
+      businessLogo: logo,
       phone: text(req.body.phone, 'Phone'),
+      phoneSriLanka: text(req.body.phoneSriLanka, 'Sri Lankan phone'),
       email: text(req.body.email, 'Email'),
-      businessAddress: text(req.body.businessAddress, 'Business address')
+      website: text(req.body.website, 'Website'),
+      businessAddress: text(req.body.businessAddress, 'Business address'),
+      sriLankanAddress: text(req.body.sriLankanAddress, 'Sri Lankan address'),
+      defaultCurrency: text(req.body.defaultCurrency, 'Default currency') || 'EUR',
+      invoicePrefix: text(req.body.invoicePrefix, 'Invoice prefix') || 'INV',
+      paymentTermsDays,
+      invoiceAccentColor: accentColor.toUpperCase(),
+      bankName: text(req.body.bankName, 'Bank name'),
+      accountHolder: text(req.body.accountHolder, 'Account holder'),
+      iban: text(req.body.iban, 'IBAN'),
+      bic: text(req.body.bic, 'BIC / SWIFT')
     };
     const user = await User.findByIdAndUpdate(req.user.id, { username, ...profile }, { new: true, runValidators: true });
     res.json({ user: publicUser(user) });
@@ -553,6 +588,51 @@ app.get('/api/consignments/:id/invoice-preview', requireAuth, requireAdmin, asyn
   res.json({ snapshot: invoiceSnapshot(consignment, req.user) });
 });
 
+app.get('/api/consignments/:id/payments', requireAuth, requireAdmin, async (req, res) => {
+  const consignment = await presentConsignment(req.params.id);
+  if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
+  res.json({ status: consignment.payment_status, invoiceTotal: consignment.final_total, amountPaid: consignment.amount_paid, balanceDue: consignment.balance_due, payments: consignment.payments });
+});
+
+app.post('/api/consignments/:id/payments', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const consignment = await presentConsignment(req.params.id);
+    if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
+    if (consignment.final_total <= 0) throw new Error('Add cargo charges before recording a payment.');
+    if (consignment.balance_due <= 0) throw new Error('This customer delivery is already fully paid.');
+    const amount = number(req.body.amount, 'Amount paid', { min: 0.01 });
+    if (amount > consignment.balance_due) throw new Error(`Amount paid cannot exceed the remaining balance of €${consignment.balance_due.toFixed(2)}.`);
+    const method = text(req.body.method, 'Payment method', { required: true });
+    if (!['BANK_TRANSFER', 'CASH', 'CARD', 'OTHER'].includes(method)) throw new Error('Select a valid payment method.');
+    const paymentDate = new Date(`${text(req.body.paymentDate, 'Payment date', { required: true })}T12:00:00.000Z`);
+    if (Number.isNaN(paymentDate.getTime())) throw new Error('Enter a valid payment date.');
+    await Payment.create({ sqliteId: await nextMongoSourceId(Payment), consignment: consignment.id, amount, method, paymentDate, reference: text(req.body.reference, 'Payment reference'), notes: text(req.body.notes, 'Payment notes'), recordedBy: req.user.id, createdAt: new Date() });
+    const updated = await presentConsignment(consignment.id);
+    if (updated.payment_status === 'PAID') await Invoice.updateMany({ consignment: consignment.id, status: 'ISSUED' }, { status: 'PAID' });
+    res.status(201).json(updated);
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.patch('/api/payments/:id/void', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ error: 'Payment record not found.' });
+    if (payment.status === 'VOID') throw new Error('This payment has already been voided.');
+    const reason = text(req.body.reason, 'Reason for voiding', { required: true });
+    if (reason.length < 5) throw new Error('Provide a clear reason with at least 5 characters.');
+    const account = await User.findById(req.user.id).select('+passwordHash');
+    if (!account || !bcrypt.compareSync(String(req.body.password ?? ''), account.passwordHash)) return res.status(403).json({ error: 'Incorrect administrator password.' });
+    payment.status = 'VOID';
+    payment.voidReason = reason;
+    payment.voidedBy = req.user.id;
+    payment.voidedAt = new Date();
+    await payment.save();
+    const updated = await presentConsignment(payment.consignment);
+    if (updated.payment_status !== 'PAID') await Invoice.updateMany({ consignment: payment.consignment, status: 'PAID' }, { status: 'ISSUED' });
+    res.json(updated);
+  } catch (error) { res.status(error.message === 'Payment record not found.' ? 404 : 400).json({ error: error.message }); }
+});
+
 app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req, res) => {
   const consignment = await presentConsignment(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
@@ -563,7 +643,7 @@ app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req
   const publicToken = crypto.randomUUID();
   const publicUrl = `${req.protocol}://${req.get('host')}/delivery/${publicToken}`;
   const snapshot = invoiceSnapshot(consignment, req.user);
-  const invoice = await Invoice.create({ sqliteId: await nextMongoSourceId(Invoice), invoiceNumber, consignment: consignment.id, issuedBy: req.user.id, publicToken, status: 'ISSUED', snapshot, issuedDate: new Date() });
+  const invoice = await Invoice.create({ sqliteId: await nextMongoSourceId(Invoice), invoiceNumber, consignment: consignment.id, issuedBy: req.user.id, publicToken, status: consignment.payment_status === 'PAID' ? 'PAID' : 'ISSUED', snapshot, issuedDate: new Date() });
   const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 220, margin: 1, errorCorrectionLevel: 'M' });
   res.status(201).json({ id: invoice._id.toString(), invoiceNumber, snapshot, publicUrl, qrDataUrl });
 });
@@ -636,6 +716,7 @@ app.delete('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) 
     const account = await User.findById(req.user.id).select('+passwordHash');
     if (!bcrypt.compareSync(String(req.body.password ?? ''), account.passwordHash)) return res.status(403).json({ error: 'Incorrect password.' });
     if (await Invoice.exists({ consignment: consignmentId })) return res.status(409).json({ error: 'Customer delivery cannot be removed because it has invoices.' });
+    if (await Payment.exists({ consignment: consignmentId })) return res.status(409).json({ error: 'Customer delivery cannot be removed because it has payment records.' });
     await BoxItem.deleteMany({ consignment: consignmentId });
     await consignment.deleteOne();
     res.status(204).end();

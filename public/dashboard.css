@@ -414,6 +414,46 @@ input:focus { border-color: #b9a300 !important; box-shadow: 0 0 0 3px rgba(240,2
   .tracking-update-grid .wide { grid-column: auto; }
 }
 
+/* Business settings is intentionally isolated from shipment-page styling. */
+.business-settings-form { display: block; }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.4rem; }
+.settings-heading h2 { margin: 0; color: var(--dash-ink); font-size: clamp(1.6rem, 2.5vw, 2rem); letter-spacing: -.035em; }
+.settings-heading p { margin: .45rem 0 0; color: var(--dash-muted); }
+.settings-footer button:last-child,
+.logo-settings-actions button:first-of-type { color: #fff; background: #0d2b45 !important; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.settings-card { padding: 1.3rem !important; }
+.settings-card h3 { display: flex; align-items: center; gap: .55rem; margin: 0 0 1.15rem; padding-bottom: .85rem; color: #17324d; border-bottom: 1px solid var(--dash-line); font-size: 1rem; }
+.settings-card h3 span { width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid #cbd5df; border-radius: 6px; font-size: .72rem; }
+.settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+.settings-fields label { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(0, 1.4fr); align-items: center; gap: .75rem; }
+.settings-fields input,
+.settings-fields select { width: 100%; min-height: 43px; padding: .65rem; border: 1px solid #d5dae2; border-radius: 7px; color: #263244; background: #fff; font: inherit; }
+.settings-fields select:focus-visible { outline: 3px solid rgba(240,212,5,.35); outline-offset: 2px; }
+.logo-settings-content { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(170px, 1fr); align-items: center; gap: 1.2rem; }
+.business-logo-preview { height: 165px; display: grid; place-items: center; overflow: hidden; border: 1px solid #d8dde5; border-radius: 10px; background: #fbfcfd; }
+.business-logo-preview span { width: 92px; height: 92px; display: grid; place-items: center; color: #fff; border: 7px solid #d3a324; background: #0d2b45; font-size: 1.45rem; font-weight: 900; clip-path: polygon(50% 0, 94% 24%, 94% 76%, 50% 100%, 6% 76%, 6% 24%); }
+.business-logo-preview img { width: 100%; height: 100%; padding: .75rem; object-fit: contain; }
+.logo-settings-actions { display: grid; gap: .7rem; }
+.logo-settings-actions small { color: var(--dash-muted); font-size: .76rem; line-height: 1.5; }
+.settings-note { margin: 1rem 0 0; padding: .7rem .8rem; color: #28578f; border: 1px solid #c8dbf6; border-radius: 8px; background: #f2f7fd; font-size: .76rem; }
+.color-field { display: grid; grid-template-columns: 52px 1fr; align-items: center; min-height: 43px; overflow: hidden; border: 1px solid #d5dae2; border-radius: 7px; background: #fff; }
+.color-field input { width: 52px; min-height: 41px; padding: 4px; border: 0 !important; border-radius: 0; }
+.color-field output { padding: 0 .65rem; color: #4b5565; font-size: .8rem; }
+.settings-footer { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1rem; padding: 1rem 0 0; border-top: 1px solid var(--dash-line); }
+
+@media (max-width: 1100px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .settings-heading { align-items: stretch; flex-direction: column; }
+  .settings-fields { grid-template-columns: 1fr; }
+  .settings-fields label { grid-template-columns: 1fr; gap: .35rem; }
+  .logo-settings-content { grid-template-columns: 1fr; }
+  .settings-footer { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .shipment,
   button { transition: none !important; }

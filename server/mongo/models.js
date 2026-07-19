@@ -11,9 +11,24 @@ const userSchema = new Schema({
   enabled: { type: Boolean, required: true, default: true },
   fullName: { type: String, default: '' },
   businessName: { type: String, default: '' },
+  businessTagline: { type: String, default: '' },
+  registrationNumber: { type: String, default: '' },
+  vatNumber: { type: String, default: '' },
+  businessLogo: { type: String, default: '' },
   phone: { type: String, default: '' },
+  phoneSriLanka: { type: String, default: '' },
   email: { type: String, default: '' },
+  website: { type: String, default: '' },
   businessAddress: { type: String, default: '' },
+  sriLankanAddress: { type: String, default: '' },
+  defaultCurrency: { type: String, default: 'EUR' },
+  invoicePrefix: { type: String, default: 'INV' },
+  paymentTermsDays: { type: Number, default: 14, min: 0, max: 365 },
+  invoiceAccentColor: { type: String, default: '#0D2B45' },
+  bankName: { type: String, default: '' },
+  accountHolder: { type: String, default: '' },
+  iban: { type: String, default: '' },
+  bic: { type: String, default: '' },
   createdAt: { type: Date, required: true }
 }, { versionKey: false });
 
@@ -84,6 +99,22 @@ const documentSchema = new Schema({
   createdAt: { type: Date, required: true }
 }, { versionKey: false });
 
+const paymentSchema = new Schema({
+  sqliteId: sourceId,
+  consignment: { type: Schema.Types.ObjectId, ref: 'Consignment', required: true, index: true },
+  amount: { type: Number, required: true, min: 0.01 },
+  method: { type: String, required: true, enum: ['BANK_TRANSFER', 'CASH', 'CARD', 'OTHER'] },
+  paymentDate: { type: Date, required: true },
+  reference: { type: String, default: '' },
+  notes: { type: String, default: '' },
+  status: { type: String, required: true, enum: ['ACTIVE', 'VOID'], default: 'ACTIVE' },
+  recordedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  voidedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  voidedAt: { type: Date, default: null },
+  voidReason: { type: String, default: '' },
+  createdAt: { type: Date, required: true }
+}, { versionKey: false });
+
 const shipmentTrackingSchema = new Schema({
   sqliteId: sourceId,
   containerNumber: { type: String, required: true, unique: true },
@@ -113,6 +144,7 @@ export const Consignment = models.Consignment || model('Consignment', consignmen
 export const BoxItem = models.BoxItem || model('BoxItem', boxItemSchema);
 export const Invoice = models.Invoice || model('Invoice', invoiceSchema);
 export const Document = models.Document || model('Document', documentSchema);
+export const Payment = models.Payment || model('Payment', paymentSchema);
 export const ShipmentTracking = models.ShipmentTracking || model('ShipmentTracking', shipmentTrackingSchema);
 export const Counter = models.Counter || model('Counter', counterSchema);
 
@@ -125,4 +157,4 @@ export async function nextMongoSourceId(Model) {
   return counter.sequence;
 }
 
-export const migrationModels = { User, Container, Customer, Consignment, BoxItem, Document, Invoice };
+export const migrationModels = { User, Container, Customer, Consignment, BoxItem, Document, Invoice, Payment };

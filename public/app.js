@@ -77,6 +77,7 @@ async function dashboard() {
   try { me = await api('/api/auth/me'); } catch { return login(); }
   currentUser = me.user;
   app.innerHTML = document.querySelector('#dashboard-template').innerHTML;
+  initializeBusinessSettingsPanel();
   const sidebarTop = document.querySelector('.sidebar-top');
   sidebarTop.insertAdjacentHTML('afterbegin', '<div class="dashboard-brand"><span class="dashboard-brand-mark" aria-hidden="true">◆</span><div><strong id="dashboard-business-name">Cargo Management</strong><small>Operations workspace</small></div></div>');
   try {
@@ -90,8 +91,13 @@ async function dashboard() {
   document.querySelector('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); login(); };
   document.querySelector('#new-shipment').onclick = () => { setActiveNavigation('new-shipment'); showNewShipmentForm(); };
   document.querySelector('#current-shipment').onclick = () => { setActiveNavigation('current-shipment'); showCurrentShipments(); };
-  document.querySelector('#settings').onclick = () => { setActiveNavigation('settings'); showProfileSettings(me.user); };
+  document.querySelector('#settings').onclick = () => { setActiveNavigation('settings'); showProfileSettings(currentUser); };
   document.querySelector('#profile-settings-form').addEventListener('submit', saveProfileSettings);
+  configureBusinessLogoUpload();
+  document.querySelector('#cancel-business-settings').onclick = () => {
+    fillProfileSettings(currentUser);
+    showToast('Unsaved settings were reset.', 'success');
+  };
   if (me.user.role === 'ADMIN') {
     const employeeButton = document.querySelector('#employees'); employeeButton.classList.remove('hidden'); employeeButton.onclick = () => { setActiveNavigation('employees'); showEmployeeManagement(); };
     const trackingButton = document.querySelector('#shipment-tracking'); trackingButton.classList.remove('hidden'); trackingButton.onclick = () => { setActiveNavigation('shipment-tracking'); showShipmentTracking(); };
@@ -363,6 +369,52 @@ function showProfileSettings(user) {
   document.querySelector('#delivery-status-panel')?.classList.add('hidden');
   document.querySelector('#settings-panel').classList.remove('hidden');
   fillProfileSettings(user);
+}
+
+function initializeBusinessSettingsPanel() {
+  const panel = document.querySelector('#settings-panel');
+  panel.className = 'hidden';
+  panel.innerHTML = `<form id="profile-settings-form" class="business-settings-form">
+    <header class="settings-heading"><div><h2>Business Settings</h2><p>Manage the business identity used across the application and on invoices.</p></div></header>
+    <input name="username" type="hidden"><input name="fullName" type="hidden"><input name="businessLogo" type="hidden">
+    <div class="settings-grid">
+      <section class="card settings-card logo-settings-card"><h3><span>1</span> Business Logo</h3><div class="logo-settings-content"><div id="business-logo-preview" class="business-logo-preview" aria-label="Business logo preview"><span>MCS</span></div><div class="logo-settings-actions"><input id="business-logo-file" type="file" accept="image/png,image/jpeg" hidden><button id="upload-business-logo" type="button">Upload Logo</button><button id="remove-business-logo" type="button" class="secondary">Remove</button><small>PNG or JPG · Transparent background recommended · Maximum 2 MB</small></div></div><p class="settings-note">ⓘ Your logo will be available for invoices, receipts, reports, login and navigation.</p></section>
+      <section class="card settings-card"><h3><span>2</span> Business Identity</h3><div class="settings-fields"><label>Business Name<input name="businessName" required></label><label>Tagline<input name="businessTagline"></label><label>Registration Number<input name="registrationNumber"></label><label>Tax / VAT Number<input name="vatNumber"></label></div></section>
+      <section class="card settings-card"><h3><span>3</span> Contact Details</h3><div class="settings-fields"><label>German Phone<input name="phone" type="tel"></label><label>Sri Lankan Phone<input name="phoneSriLanka" type="tel"></label><label>Email<input name="email" type="email"></label><label>Website<input name="website" type="url" placeholder="https://"></label><label>German Address<input name="businessAddress"></label><label>Sri Lankan Address<input name="sriLankanAddress"></label></div></section>
+      <section class="card settings-card"><h3><span>4</span> Invoice &amp; Payment Defaults</h3><div class="settings-fields settings-payment-fields"><label>Default Currency<select name="defaultCurrency"><option value="EUR">EUR — Euro</option></select></label><label>Invoice Prefix<input name="invoicePrefix" maxlength="10"></label><label>Default Payment Terms<select name="paymentTermsDays"><option value="0">Due on receipt</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label><label>Invoice Accent Colour<span class="color-field"><input name="invoiceAccentColor" type="color" value="#0d2b45"><output id="invoice-accent-value">#0D2B45</output></span></label><label>Bank Name<input name="bankName"></label><label>Account Holder<input name="accountHolder"></label><label>IBAN<input name="iban"></label><label>BIC / SWIFT<input name="bic"></label></div></section>
+    </div><footer class="settings-footer"><button type="button" id="cancel-business-settings" class="secondary">Cancel</button><button type="submit">Save Business Settings</button></footer>
+  </form>`;
+}
+
+function configureBusinessLogoUpload() {
+  const form = document.querySelector('#profile-settings-form');
+  const fileInput = document.querySelector('#business-logo-file');
+  document.querySelector('#upload-business-logo').onclick = () => fileInput.click();
+  document.querySelector('#remove-business-logo').onclick = () => {
+    form.elements.businessLogo.value = '';
+    renderBusinessLogo('');
+    fileInput.value = '';
+  };
+  fileInput.onchange = () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) return showToast('Choose a PNG or JPG logo.', 'error');
+    if (file.size > 2 * 1024 * 1024) return showToast('Logo must be no larger than 2 MB.', 'error');
+    const reader = new FileReader();
+    reader.onload = () => {
+      form.elements.businessLogo.value = reader.result;
+      renderBusinessLogo(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+  form.elements.invoiceAccentColor.addEventListener('input', event => {
+    document.querySelector('#invoice-accent-value').textContent = event.target.value.toUpperCase();
+  });
+}
+
+function renderBusinessLogo(source) {
+  const preview = document.querySelector('#business-logo-preview');
+  preview.innerHTML = source ? `<img src="${source}" alt="Business logo">` : '<span>MCS</span>';
 }
 
 async function showEmployeeManagement() {
@@ -639,8 +691,10 @@ async function openEmployeeDelivery(id, shipment) {
 
 function fillProfileSettings(user) {
   const form = document.querySelector('#profile-settings-form');
-  const values = { username:user.username, fullName:user.full_name, businessName:user.business_name, phone:user.phone, email:user.email, businessAddress:user.business_address };
+  const values = { username:user.username, fullName:user.full_name, businessName:user.business_name, businessTagline:user.business_tagline, registrationNumber:user.registration_number, vatNumber:user.vat_number, businessLogo:user.business_logo, phone:user.phone, phoneSriLanka:user.phone_sri_lanka, email:user.email, website:user.website, businessAddress:user.business_address, sriLankanAddress:user.sri_lankan_address, defaultCurrency:user.default_currency || 'EUR', invoicePrefix:user.invoice_prefix || 'INV', paymentTermsDays:String(user.payment_terms_days ?? 14), invoiceAccentColor:user.invoice_accent_color || '#0D2B45', bankName:user.bank_name, accountHolder:user.account_holder, iban:user.iban, bic:user.bic };
   Object.entries(values).forEach(([key, value]) => form.elements[key].value = value || '');
+  renderBusinessLogo(values.businessLogo);
+  document.querySelector('#invoice-accent-value').textContent = values.invoiceAccentColor.toUpperCase();
 }
 
 async function saveProfileSettings(event) {
@@ -648,9 +702,12 @@ async function saveProfileSettings(event) {
   const form = event.currentTarget;
   try {
     const { user } = await api('/api/profile', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+    currentUser = user;
     document.querySelector('#admin-name').textContent = user.username;
     document.querySelector('.avatar').textContent = user.username.charAt(0).toUpperCase();
-    message(form, 'Account details saved.', 'success');
+    document.querySelector('#dashboard-business-name').textContent = user.business_name || 'Cargo Management';
+    document.title = `${user.business_name || 'Cargo Management'} · Settings`;
+    showToast('Business settings saved.');
   } catch (error) { message(form, error.message); }
 }
 
@@ -707,7 +764,9 @@ function renderItems() { const editor = document.querySelector('#item-editor'); 
 function renderDocumentActions(consignment = null) {
   const pageActionBar = document.querySelector('.page-action-bar');
   if (!pageActionBar) return;
+  pageActionBar.querySelector('.payment-information')?.remove();
   pageActionBar.querySelector('.invoice-actions')?.remove();
+  renderPaymentInformation(pageActionBar, consignment);
   const invoiceActions = document.createElement('div');
   invoiceActions.className = 'invoice-actions';
   invoiceActions.innerHTML = `<button type="button" id="preview-invoice" class="secondary" ${consignment ? '' : 'disabled'}>Preview invoice</button><button type="button" id="download-packing-list" class="secondary" ${consignment ? '' : 'disabled'}>Download packing list</button><button type="button" id="issue-invoice" ${consignment ? '' : 'disabled'}>Print invoice</button>`;
@@ -716,6 +775,82 @@ function renderDocumentActions(consignment = null) {
   invoiceActions.querySelector('#preview-invoice').onclick = () => openInvoice(consignment, false, document.querySelector('#item-editor'));
   invoiceActions.querySelector('#download-packing-list').onclick = () => window.open(`/api/consignments/${consignment.id}/packing-list`, '_blank');
   invoiceActions.querySelector('#issue-invoice').onclick = () => openInvoice(consignment, true, document.querySelector('#item-editor'));
+}
+
+function renderPaymentInformation(pageActionBar, consignment) {
+  const payment = document.createElement('section');
+  payment.className = 'payment-information';
+  const total = Number(consignment?.final_total || 0);
+  const paid = Number(consignment?.amount_paid || 0);
+  const balance = Number(consignment?.balance_due ?? total);
+  const status = consignment?.payment_status || 'UNPAID';
+  const statusLabel = { UNPAID: 'Unpaid', PARTIALLY_PAID: 'Partially Paid', PAID: 'Paid' }[status];
+  const today = new Date().toISOString().slice(0, 10);
+  payment.innerHTML = `<h3>Payment Information</h3><form class="payment-form"><label>Payment Method<select name="method" ${!consignment || status === 'PAID' ? 'disabled' : ''}><option value="BANK_TRANSFER">Bank Transfer</option><option value="CASH">Cash</option><option value="CARD">Card</option><option value="OTHER">Other</option></select></label><label>Invoice Total<input value="€${total.toFixed(2)}" readonly></label><label>Amount Paid<input name="amount" type="number" min="0.01" max="${balance.toFixed(2)}" step="0.01" placeholder="€0.00" ${!consignment || status === 'PAID' ? 'disabled' : ''}></label><label>Balance Due<input value="€${balance.toFixed(2)}" readonly></label><label>Payment Status<span class="payment-status status-${status.toLowerCase()}">${statusLabel}</span></label><label>Payment Date<input name="paymentDate" type="date" value="${today}" ${!consignment || status === 'PAID' ? 'disabled' : ''}></label><label>Payment Reference<input name="reference" maxlength="100" placeholder="Transaction reference" ${!consignment || status === 'PAID' ? 'disabled' : ''}></label><button ${!consignment || status === 'PAID' ? 'disabled' : ''}>Record Payment</button></form><div class="payment-information-footer"><button type="button" class="payment-history-link" ${consignment ? '' : 'disabled'}>View payment history (${consignment?.payments?.length || 0})</button><span>Balance is calculated automatically.</span></div>`;
+  pageActionBar.append(payment);
+  if (!consignment) return;
+  payment.querySelector('.payment-form').onsubmit = async event => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button');
+    button.disabled = true;
+    button.textContent = 'Recording…';
+    try {
+      activeConsignment = await api(`/api/consignments/${consignment.id}/payments`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      renderItems();
+      showToast('Payment recorded successfully.');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Record Payment';
+      message(payment, error.message);
+    }
+  };
+  payment.querySelector('.payment-history-link').onclick = () => showPaymentHistory(consignment);
+}
+
+function showPaymentHistory(consignment) {
+  const methodLabels = { BANK_TRANSFER: 'Bank transfer', CASH: 'Cash', CARD: 'Card', OTHER: 'Other' };
+  const dialog = document.createElement('dialog');
+  dialog.className = 'payment-history-dialog';
+  const rows = consignment.payments?.map(payment => `<tr class="${payment.status === 'VOID' ? 'void-payment-row' : ''}"><td>${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(payment.payment_date))}</td><td>€${Number(payment.amount).toFixed(2)}</td><td>${methodLabels[payment.method] || escapeHtml(payment.method)}</td><td>${escapeHtml(payment.reference || '—')}</td><td>${escapeHtml(payment.recorded_by || '—')}</td><td><span class="payment-record-status ${payment.status === 'VOID' ? 'void' : 'active'}">${payment.status === 'VOID' ? 'Voided' : 'Active'}</span>${payment.status === 'VOID' ? `<small class="void-payment-reason">${escapeHtml(payment.void_reason)}<br>By ${escapeHtml(payment.voided_by || 'Administrator')}</small>` : ''}</td><td>${payment.status === 'VOID' ? '' : `<button type="button" class="void-payment-button" data-void-payment="${payment.id}">Void</button>`}</td></tr>`).join('');
+  dialog.innerHTML = `<section><header><div><h2>Payment history</h2><p>${escapeHtml(consignment.customer_ref)} — ${escapeHtml(consignment.customer_name)}</p></div><button type="button" class="secondary" aria-label="Close">×</button></header>${rows ? `<div class="payment-history-table-wrap"><table class="table"><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Recorded by</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="payment-history-empty">No payments have been recorded yet.</p>'}<footer><strong>Total active payments</strong><strong>€${Number(consignment.amount_paid || 0).toFixed(2)}</strong></footer></section>`;
+  document.body.append(dialog);
+  dialog.querySelector('header button').onclick = () => dialog.close();
+  dialog.querySelectorAll('[data-void-payment]').forEach(button => button.onclick = () => {
+    const payment = consignment.payments.find(item => item.id === button.dataset.voidPayment);
+    dialog.close();
+    showVoidPaymentDialog(payment, consignment);
+  });
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
+}
+
+function showVoidPaymentDialog(payment, consignment) {
+  const methodLabels = { BANK_TRANSFER: 'Bank transfer', CASH: 'Cash', CARD: 'Card', OTHER: 'Other' };
+  const dialog = document.createElement('dialog');
+  dialog.className = 'void-payment-dialog';
+  dialog.innerHTML = `<form><div class="void-dialog-icon" aria-hidden="true">!</div><h2>Void Payment</h2><p class="void-dialog-intro">The original transaction will remain in payment history and the balance will be recalculated.</p><dl><div><dt>Payment amount</dt><dd>€${Number(payment.amount).toFixed(2)}</dd></div><div><dt>Payment date</dt><dd>${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(payment.payment_date))}</dd></div><div><dt>Payment method</dt><dd>${methodLabels[payment.method] || escapeHtml(payment.method)}</dd></div><div><dt>Reference</dt><dd>${escapeHtml(payment.reference || '—')}</dd></div></dl><label>Reason for voiding<textarea name="reason" minlength="5" maxlength="300" required placeholder="Explain what was entered incorrectly"></textarea></label><label>Administrator Password<input name="password" type="password" autocomplete="current-password" required></label><p class="void-dialog-warning">This action preserves the payment as a voided audit record.</p><div class="void-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button class="danger-button">Void Payment</button></div></form>`;
+  document.body.append(dialog);
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.querySelector('form').onsubmit = async event => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('.danger-button');
+    button.disabled = true;
+    button.textContent = 'Voiding…';
+    try {
+      activeConsignment = await api(`/api/payments/${payment.id}/void`, { method: 'PATCH', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      dialog.close();
+      renderItems();
+      showToast('Payment voided. Balance and status were recalculated.');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Void Payment';
+      message(event.currentTarget, error.message);
+    }
+  };
+  dialog.showModal();
 }
 
 function enableItemEnterNavigation(form) {
