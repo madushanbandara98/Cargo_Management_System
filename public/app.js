@@ -93,6 +93,7 @@ async function dashboard() {
   document.querySelector('#current-shipment').onclick = () => { setActiveNavigation('current-shipment'); showCurrentShipments(); };
   document.querySelector('#settings').onclick = () => { setActiveNavigation('settings'); showProfileSettings(currentUser); };
   document.querySelector('#profile-settings-form').addEventListener('submit', saveProfileSettings);
+  document.querySelector('#change-password-form').addEventListener('submit', changeAdministratorPassword);
   configureBusinessLogoUpload();
   document.querySelector('#cancel-business-settings').onclick = () => {
     fillProfileSettings(currentUser);
@@ -395,7 +396,7 @@ function initializeBusinessSettingsPanel() {
       <section class="card settings-card"><h3><span>3</span> Contact Details</h3><div class="settings-fields"><label>German Phone<input name="phone" type="tel"></label><label>Sri Lankan Phone<input name="phoneSriLanka" type="tel"></label><label>Email<input name="email" type="email"></label><label>Website<input name="website" type="url" placeholder="https://"></label><label>German Address<input name="businessAddress"></label><label>Sri Lankan Address<input name="sriLankanAddress"></label></div></section>
       <section class="card settings-card"><h3><span>4</span> Invoice &amp; Payment Defaults</h3><div class="settings-fields settings-payment-fields"><label>Default Currency<select name="defaultCurrency"><option value="EUR">EUR — Euro</option></select></label><label>Invoice Prefix<input name="invoicePrefix" maxlength="10"></label><label>Default Payment Terms<select name="paymentTermsDays"><option value="0">Due on receipt</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label><label>Invoice Accent Colour<span class="color-field"><input name="invoiceAccentColor" type="color" value="#0d2b45"><output id="invoice-accent-value">#0D2B45</output></span></label><label>Bank Name<input name="bankName"></label><label>Account Holder<input name="accountHolder"></label><label>IBAN<input name="iban"></label><label>BIC / SWIFT<input name="bic"></label></div></section>
     </div><footer class="settings-footer"><button type="button" id="cancel-business-settings" class="secondary">Cancel</button><button type="submit">Save Business Settings</button></footer>
-  </form>`;
+  </form><form id="change-password-form" class="card settings-card password-settings-card"><h3><span>5</span> Administrator Password</h3><p class="password-settings-intro">Changing the password signs out every active administrator session.</p><div class="settings-fields password-settings-fields"><label>Current Password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New Password<input name="newPassword" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm New Password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label></div><footer class="settings-footer"><button type="submit">Change Password</button></footer></form>`;
 }
 
 function configureBusinessLogoUpload() {
@@ -720,6 +721,19 @@ async function saveProfileSettings(event) {
     document.querySelector('#dashboard-business-name').textContent = user.business_name || 'Cargo Management';
     document.title = `${user.business_name || 'Cargo Management'} · Settings`;
     showToast('Business settings saved.');
+  } catch (error) { message(form, error.message); }
+}
+
+async function changeAdministratorPassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  if (values.newPassword !== values.confirmPassword) return message(form, 'New password and confirmation do not match.');
+  try {
+    await api('/api/profile/password', { method: 'PUT', body: JSON.stringify(values) });
+    form.reset();
+    alert('Password changed successfully. Sign in again with your new password.');
+    login();
   } catch (error) { message(form, error.message); }
 }
 

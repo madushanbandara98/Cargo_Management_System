@@ -42,7 +42,7 @@ function requireReference(map, sqliteId, description) {
 async function migrate(sqlite) {
   const users = sqlite.prepare('SELECT * FROM users ORDER BY id').all();
   await upsertMany(User, users.map(row => ({
-    sqliteId: row.id, username: row.username, passwordHash: row.password_hash, role: row.role,
+    sqliteId: row.id, username: row.username, passwordHash: row.password_hash, sessionVersion: 0, role: row.role,
     fullName: row.full_name || '', businessName: row.business_name || '', phone: row.phone || '',
     email: row.email || '', businessAddress: row.business_address || '',
     createdAt: sqliteDate(row.created_at, `users.${row.id}.created_at`)

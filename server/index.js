@@ -47,6 +47,7 @@ async function sessionUser(req) {
   try { payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }); }
   catch { return null; }
   const user = await User.findById(payload.sub);
+  if (user && Number(payload.sessionVersion || 0) !== Number(user.sessionVersion || 0)) return null;
   return user && user.enabled !== false ? publicUser(user) : null;
 }
 
@@ -219,7 +220,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   const password = String(req.body.password ?? '');
   const user = await User.findOne({ username: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).select('+passwordHash');
   if (!user || user.enabled === false || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid username or password.' });
-  const token = jwt.sign({}, jwtSecret(), { algorithm: 'HS256', subject: user._id.toString(), expiresIn: '8h' });
+  const token = jwt.sign({ sessionVersion: user.sessionVersion || 0 }, jwtSecret(), { algorithm: 'HS256', subject: user._id.toString(), expiresIn: '8h' });
   res.cookie('cargo_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 });
   res.json({ user: publicUser(user) });
  } catch (error) { next(error); }
@@ -267,6 +268,28 @@ app.put('/api/profile', requireAuth, requireAdmin, async (req, res) => {
     res.json({ user: publicUser(user) });
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That username is already in use.' : error.message });
+  }
+});
+
+app.put('/api/profile/password', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword ?? '');
+    const newPassword = String(req.body.newPassword ?? '');
+    const confirmPassword = String(req.body.confirmPassword ?? '');
+    const administrator = await User.findById(req.user.id).select('+passwordHash');
+    if (!administrator || !bcrypt.compareSync(currentPassword, administrator.passwordHash)) {
+      return res.status(403).json({ error: 'Current password is incorrect.' });
+    }
+    if (newPassword.length < 8) throw new Error('New password must have at least 8 characters.');
+    if (newPassword !== confirmPassword) throw new Error('New password and confirmation do not match.');
+    if (bcrypt.compareSync(newPassword, administrator.passwordHash)) throw new Error('New password must be different from the current password.');
+    administrator.passwordHash = bcrypt.hashSync(newPassword, 12);
+    administrator.sessionVersion = Number(administrator.sessionVersion || 0) + 1;
+    await administrator.save();
+    res.clearCookie('cargo_session', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+    res.status(204).end();
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
 

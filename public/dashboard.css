@@ -441,6 +441,11 @@ input:focus { border-color: #b9a300 !important; box-shadow: 0 0 0 3px rgba(240,2
 .color-field input { width: 52px; min-height: 41px; padding: 4px; border: 0 !important; border-radius: 0; }
 .color-field output { padding: 0 .65rem; color: #4b5565; font-size: .8rem; }
 .settings-footer { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1rem; padding: 1rem 0 0; border-top: 1px solid var(--dash-line); }
+.password-settings-card { margin-top: 1rem; }
+.password-settings-intro { margin: -.35rem 0 1rem; color: var(--dash-muted); font-size: .82rem; }
+.password-settings-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.password-settings-fields label { grid-template-columns: 1fr; align-items: start; gap: .4rem; }
+.password-settings-card .settings-footer button { color: #fff; background: #0d2b45 !important; }
 
 @media (max-width: 1100px) {
   .settings-grid { grid-template-columns: 1fr; }

@@ -7,6 +7,7 @@ const userSchema = new Schema({
   sqliteId: sourceId,
   username: { type: String, required: true, unique: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
+  sessionVersion: { type: Number, required: true, default: 0 },
   role: { type: String, required: true, enum: ['ADMIN', 'USER'] },
   enabled: { type: Boolean, required: true, default: true },
   fullName: { type: String, default: '' },
