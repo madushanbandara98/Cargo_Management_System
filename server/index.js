@@ -556,14 +556,14 @@ app.get('/api/consignments/:id/packing-list', requireAuth, requireAdmin, async (
   document.y = Math.max(document.y, detailsY + 92);
   document.moveTo(48, document.y).lineTo(547, document.y).strokeColor('#dfe3e8').lineWidth(1).stroke();
   document.moveDown(1.1);
-  const deliveryAddress = consignment.sri_lankan_address || consignment.german_address || 'Address not provided';
-  const deliveryPhone = consignment.phone_lk || consignment.phone_de || '';
+  const deliveryAddress = consignment.sri_lankan_address || 'Address not provided';
+  const deliveryPhone = consignment.phone_lk || '';
   const addressY = document.y;
   const addressHeight = Math.max(98, document.heightOfString(deliveryAddress, { width: 450 }) + (deliveryPhone ? 85 : 70));
   document.roundedRect(48, addressY, 499, addressHeight, 9).fill('#fffdf0').strokeColor('#d9c219').lineWidth(1.2).stroke();
   document.roundedRect(62, addressY + 13, 118, 22, 6).fill('#f0d405');
   document.font('Helvetica-Bold').fontSize(8).fillColor('#302b00').text('DELIVERY ADDRESS', 72, addressY + 20, { width: 98 });
-  document.font('Helvetica-Bold').fontSize(13).fillColor('#20283a').text(consignment.customer_name, 62, addressY + 45, { width: 465 });
+  document.font('Helvetica-Bold').fontSize(13).fillColor('#20283a').text(consignment.delivery_contact_name || consignment.customer_name, 62, addressY + 45, { width: 465 });
   document.font('Helvetica').fontSize(9).fillColor('#687086').text(`Customer reference: ${consignment.customer_ref}`, 62, document.y + 3, { width: 465 });
   document.font('Helvetica-Bold').fontSize(10).fillColor('#20283a').text(deliveryAddress, 62, document.y + 7, { width: 465 });
   if (deliveryPhone) document.font('Helvetica').fontSize(9).fillColor('#4f596b').text(`Phone: ${deliveryPhone}`, 62, document.y + 6, { width: 465 });
@@ -701,8 +701,9 @@ app.get('/delivery/:token', async (req, res) => {
   const snapshot = invoice.snapshot;
   const deliveryAddress = snapshot.customer.sriLankanAddress || snapshot.customer.address || snapshot.customer.germanAddress || '—';
   const deliveryPhone = snapshot.customer.phoneSriLanka || snapshot.customer.phone || snapshot.customer.phoneGermany || '';
-  const rows = snapshot.items.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.description || 'Cargo item')}</td><td>${item.height_cm} × ${item.width_cm} × ${item.depth_cm} cm</td><td>${item.quantity}</td></tr>`).join('');
-  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(invoice.invoiceNumber)}</title><style>body{margin:0;background:#f5f6f8;color:#20283a;font:16px system-ui,sans-serif}.page{max-width:760px;margin:0 auto;padding:1rem}.card{background:#fff;border:1px solid #e2e5ea;border-radius:14px;padding:1.25rem;margin:1rem 0}.heading{border-bottom:5px solid #0d2b45}.heading h1{margin:0;font-size:1.5rem}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;margin-top:1rem}.summary div{padding:.8rem;border-radius:8px;background:#f2f5f7}.summary small,.summary strong{display:block}.summary strong{margin-top:.25rem}.download{display:inline-block;margin-top:.8rem;padding:.65rem .9rem;border-radius:8px;background:#0d2b45;color:#fff;text-decoration:none;font-weight:700}h2{font-size:1rem;margin:0 0 .6rem}p{line-height:1.5;margin:.3rem 0}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #e2e5ea}th{background:#f4f5f7}@media(max-width:520px){.page{padding:.5rem}.card{padding:1rem}.summary{grid-template-columns:1fr}table{font-size:.8rem}th,td{padding:.5rem}}</style></head><body><main class="page"><section class="card heading"><h1>Invoice ${escapeHtml(invoice.invoiceNumber)}</h1><p>${escapeHtml(snapshot.business.name || 'Cargo Management')}</p><div class="summary"><div><small>Total</small><strong>€${Number(snapshot.finalTotal || 0).toFixed(2)}</strong></div><div><small>Amount paid</small><strong>€${Number(snapshot.amountPaid || 0).toFixed(2)}</strong></div><div><small>Balance due</small><strong>€${Number(snapshot.balanceDue ?? snapshot.finalTotal ?? 0).toFixed(2)}</strong></div></div><a class="download" href="/delivery/${encodeURIComponent(req.params.token)}/download">Download delivery sheet (PDF)</a></section><section class="card"><h2>Ship to</h2><p><strong>${escapeHtml(snapshot.customer.name)}</strong></p><p>Reference: ${escapeHtml(snapshot.customer.reference)}</p><p>${escapeHtml(deliveryAddress).replace(/\n/g, '<br>')}</p>${deliveryPhone ? `<p>${escapeHtml(deliveryPhone)}</p>` : ''}</section><section class="card"><h2>Items</h2><table><thead><tr><th>#</th><th>Description</th><th>Dimensions</th><th>Quantity</th></tr></thead><tbody>${rows}</tbody></table></section></main></body></html>`);
+  const deliveryContactName = snapshot.customer.deliveryContactName || snapshot.customer.name;
+  const rows = snapshot.items.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.description || 'Cargo item')}</td><td>${item.quantity}</td></tr>`).join('');
+  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer delivery</title><style>body{margin:0;background:#f5f6f8;color:#20283a;font:16px system-ui,sans-serif}.page{max-width:760px;margin:0 auto;padding:1rem}.card{background:#fff;border:1px solid #e2e5ea;border-radius:14px;padding:1.25rem;margin:1rem 0}.heading{border-bottom:5px solid #0d2b45}.heading h1{margin:0;font-size:1.5rem}.download{display:inline-block;margin-top:1rem;padding:.65rem .9rem;border-radius:8px;background:#0d2b45;color:#fff;text-decoration:none;font-weight:700}h2{font-size:1rem;margin:0 0 .6rem}p{line-height:1.5;margin:.3rem 0}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #e2e5ea}th{background:#f4f5f7}th:last-child,td:last-child{text-align:right}@media(max-width:520px){.page{padding:.5rem}.card{padding:1rem}table{font-size:.8rem}th,td{padding:.5rem}}</style></head><body><main class="page"><section class="card heading"><h1>${escapeHtml(snapshot.customer.name)}</h1><p>Customer reference: <strong>${escapeHtml(snapshot.customer.reference)}</strong></p><a class="download" href="/delivery/${encodeURIComponent(req.params.token)}/download">Download delivery sheet (PDF)</a></section><section class="card"><h2>Ship to</h2><p><strong>${escapeHtml(deliveryContactName)}</strong></p><p>${escapeHtml(deliveryAddress).replace(/\n/g, '<br>')}</p>${deliveryPhone ? `<p>${escapeHtml(deliveryPhone)}</p>` : ''}</section><section class="card"><h2>Items</h2><table><thead><tr><th>#</th><th>Description</th><th>Quantity</th></tr></thead><tbody>${rows}</tbody></table></section></main></body></html>`);
 });
 
 app.get('/delivery/:token/download', async (req, res) => {
@@ -710,18 +711,22 @@ app.get('/delivery/:token/download', async (req, res) => {
   if (!invoice) return res.status(404).send('Delivery details not found.');
   const snapshot = invoice.snapshot;
   const deliveryAddress = snapshot.customer.sriLankanAddress || snapshot.customer.address || snapshot.customer.germanAddress || '—';
+  const deliveryContactName = snapshot.customer.deliveryContactName || snapshot.customer.name;
+  const deliveryPhone = snapshot.customer.phoneSriLanka || snapshot.customer.phone || snapshot.customer.phoneGermany || '';
   const document = new PDFDocument({ size: 'A4', margin: 48 });
   res.attachment('delivery-sheet.pdf');
   document.pipe(res);
   document.fontSize(22).fillColor('#20283a').text('DELIVERY SHEET');
   document.moveTo(48, 82).lineTo(547, 82).strokeColor('#e3bd15').lineWidth(4).stroke();
   document.moveDown(1.5).fillColor('#20283a').fontSize(13).text('Customer');
-  document.fontSize(11).text(snapshot.customer.name).text(`Reference: ${snapshot.customer.reference}`).text(deliveryAddress);
-  document.moveDown().fontSize(12).text(`Total items: ${snapshot.totalItems}`);
+  document.fontSize(11).text(snapshot.customer.name).text(`Reference: ${snapshot.customer.reference}`);
+  document.moveDown().fontSize(13).text('Ship to');
+  document.fontSize(11).text(deliveryContactName).text(deliveryAddress);
+  if (deliveryPhone) document.text(deliveryPhone);
   document.moveDown().fontSize(13).text('Items for delivery');
   document.moveDown(.5).fontSize(10);
-  const columns = [48, 78, 260, 420, 495];
-  document.font('Helvetica-Bold').text('#', columns[0]).text('Description', columns[1]).text('Dimensions', columns[2]).text('Quantity', columns[3]);
+  const columns = [48, 78, 470];
+  document.font('Helvetica-Bold').text('#', columns[0]).text('Description', columns[1]).text('Quantity', columns[2]);
   document.moveDown(.5).moveTo(48, document.y).lineTo(547, document.y).strokeColor('#d9dde5').lineWidth(1).stroke();
   document.font('Helvetica');
   snapshot.items.forEach((item, index) => {
@@ -729,9 +734,8 @@ app.get('/delivery/:token/download', async (req, res) => {
     document.moveDown(.6);
     const y = document.y;
     document.text(String(index + 1), columns[0], y, { width: 22 });
-    document.text(item.description || 'Cargo item', columns[1], y, { width: 170 });
-    document.text(`${item.height_cm} × ${item.width_cm} × ${item.depth_cm} cm`, columns[2], y, { width: 140 });
-    document.text(String(item.quantity), columns[3], y, { width: 52, align: 'right' });
+    document.text(item.description || 'Cargo item', columns[1], y, { width: 360 });
+    document.text(String(item.quantity), columns[2], y, { width: 76, align: 'right' });
     document.y = Math.max(document.y, y + 20);
     document.moveTo(48, document.y).lineTo(547, document.y).strokeColor('#e7e9ef').stroke();
   });
