@@ -8,6 +8,7 @@ const userSchema = new Schema({
   username: { type: String, required: true, unique: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, required: true, enum: ['ADMIN', 'USER'] },
+  enabled: { type: Boolean, required: true, default: true },
   fullName: { type: String, default: '' },
   businessName: { type: String, default: '' },
   phone: { type: String, default: '' },
@@ -83,6 +84,22 @@ const documentSchema = new Schema({
   createdAt: { type: Date, required: true }
 }, { versionKey: false });
 
+const shipmentTrackingSchema = new Schema({
+  sqliteId: sourceId,
+  containerNumber: { type: String, required: true, unique: true },
+  carrier: { type: String, required: true },
+  trackingUrl: { type: String, default: '' },
+  origin: { type: String, default: '' },
+  destination: { type: String, default: '' },
+  vessel: { type: String, default: '' },
+  latestStatus: { type: String, default: 'Not updated' },
+  status: { type: String, required: true, enum: ['NOT_UPDATED', 'IN_TRANSIT', 'DELAYED', 'ARRIVING_SOON', 'DELIVERED'], default: 'NOT_UPDATED' },
+  eta: { type: Date, default: null },
+  createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  createdAt: { type: Date, required: true },
+  updatedAt: { type: Date, required: true }
+}, { versionKey: false });
+
 const counterSchema = new Schema({
   _id: { type: String, required: true },
   sequence: { type: Number, required: true, default: 0 }
@@ -96,6 +113,7 @@ export const Consignment = models.Consignment || model('Consignment', consignmen
 export const BoxItem = models.BoxItem || model('BoxItem', boxItemSchema);
 export const Invoice = models.Invoice || model('Invoice', invoiceSchema);
 export const Document = models.Document || model('Document', documentSchema);
+export const ShipmentTracking = models.ShipmentTracking || model('ShipmentTracking', shipmentTrackingSchema);
 export const Counter = models.Counter || model('Counter', counterSchema);
 
 export async function nextMongoSourceId(Model) {

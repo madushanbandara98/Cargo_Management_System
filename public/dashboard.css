@@ -112,6 +112,8 @@
 }
 
 #current-shipment::before { content: "▦"; }
+#shipment-tracking::before { content: "⌖"; }
+#delivery-status::before { content: "✓"; }
 #new-shipment::before { content: "+"; font-size: 1.25rem; }
 #settings::before { content: "⚙"; }
 #employees::before { content: "♟"; }
@@ -186,6 +188,119 @@ button.secondary { color: #344054; background: #edf0f4 !important; }
 #shipment-form,
 #employees-panel,
 #settings-panel { padding: clamp(1.25rem, 2.5vw, 2rem) !important; }
+
+.tracking-search { display: grid; grid-template-columns: minmax(16rem, 2fr) minmax(12rem, 1fr) auto; align-items: end; gap: 1rem; padding: 1.25rem !important; }
+.tracking-search label { margin: 0; }
+.tracking-search input,
+.tracking-search select { width: 100%; min-height: 44px; }
+.tracking-search button { min-width: 10rem; color: #292600; border: 1px solid #cbb400; background: var(--dash-accent) !important; }
+.custom-carrier-fields { display: grid; grid-column: 1 / -1; grid-template-columns: 1fr 2fr; gap: 1rem; padding-top: 1rem; border-top: 1px solid var(--dash-line); }
+.custom-carrier-fields.hidden { display: none; }
+.tracking-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0; }
+.tracking-stats article { display: flex; align-items: center; gap: .8rem; min-height: 86px; padding: 1rem; border: 1px solid var(--dash-line); border-radius: 14px; background: #fff; }
+.tracking-stats small,
+.tracking-stats strong { display: block; }
+.tracking-stats small { color: var(--dash-muted); font-size: .78rem; }
+.tracking-stats strong { margin-top: .15rem; color: var(--dash-ink); font-size: 1.35rem; }
+.tracking-stat-icon { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 42px; border-radius: 50%; font-weight: 900; }
+.tracking-stat-icon.in-transit,
+.tracking-stat-icon.delivered { color: #087a4f; background: #e5f7ef; }
+.tracking-stat-icon.delayed { color: #c52a21; background: #fff0ef; }
+.tracking-stat-icon.arriving { color: #b05e00; background: #fff3df; }
+.tracking-feature { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); padding: 0 !important; overflow: hidden; }
+.tracking-feature-main { padding: 1.4rem; }
+.tracking-title { display: flex; align-items: center; gap: .7rem; }
+.tracking-title h3 { margin: 0; color: var(--dash-ink); font-size: 1.25rem; }
+.tracking-feature h4 { margin: 1.2rem 0 .65rem; color: var(--dash-ink); font-size: 1.05rem; }
+.tracking-feature h4 span { margin: 0 .45rem; color: #7b8494; }
+.tracking-latest { margin: 0; color: #167552; font-size: .88rem; }
+.tracking-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--dash-line); }
+.tracking-meta small,
+.tracking-meta strong { display: block; }
+.tracking-meta small { color: var(--dash-muted); font-size: .68rem; text-transform: uppercase; }
+.tracking-meta strong { margin-top: .25rem; overflow-wrap: anywhere; color: #30394a; font-size: .78rem; }
+.tracking-feature-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.25rem; }
+.tracking-route { display: flex; justify-content: center; flex-direction: column; padding: 1.4rem; border-left: 1px solid #dce6e1; background: linear-gradient(145deg, #f2f8f5, #edf4f8); }
+.route-line { display: flex; align-items: center; width: 100%; }
+.route-line span { width: 15px; height: 15px; flex: 0 0 15px; border: 4px solid #fff; border-radius: 50%; background: #16875b; box-shadow: 0 0 0 2px #16875b; }
+.route-line i { height: 2px; flex: 1; margin: 0 .3rem; border-top: 2px dashed #16875b; }
+.route-labels { display: flex; justify-content: space-between; gap: 1rem; margin-top: .65rem; color: var(--dash-ink); font-size: .78rem; }
+.tracking-route p { margin: 1.4rem 0 .3rem; color: #16875b; font-weight: 750; }
+.tracking-route small { color: var(--dash-muted); line-height: 1.5; }
+.tracking-badge { display: inline-flex; width: fit-content; padding: .26rem .48rem; border-radius: 6px; font-size: .66rem; font-weight: 800; text-transform: uppercase; }
+.status-in_transit,
+.status-delivered { color: #08724b; background: #dff5ea; }
+.status-delayed { color: #b42318; background: #ffebe9; }
+.status-arriving_soon { color: #a35700; background: #fff0d5; }
+.status-not_updated { color: #596275; background: #edf0f4; }
+.tracked-shipments { margin-top: 1rem; padding: 1rem !important; }
+.tracked-shipments h3 { margin: .1rem 0 1rem; color: var(--dash-ink); font-size: 1rem; }
+.tracking-table-wrap { overflow-x: auto; }
+.tracking-table { width: 100%; border-collapse: collapse; }
+.tracking-table td { padding: .7rem; border-bottom: 1px solid #e9ecf0; white-space: nowrap; }
+.tracking-table td:nth-child(4) small { display: block; max-width: 15rem; margin-top: .25rem; overflow: hidden; color: var(--dash-muted); text-overflow: ellipsis; }
+.tracking-row-actions { display: flex; gap: .35rem; }
+.tracking-menu-button,
+.tracking-remove-button { min-width: 36px; padding: .35rem; color: #4d5665; border: 1px solid #dce1e8; background: #fff !important; }
+.tracking-remove-button { color: #a62922; }
+.tracking-empty { padding: 2rem !important; text-align: center; }
+.tracking-empty-icon { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto .75rem; border-radius: 50%; color: #665b00; background: #fff8c7; }
+.tracking-empty h3 { margin: 0; color: var(--dash-ink); }
+.tracking-empty p { max-width: 560px; margin: .5rem auto 0; color: var(--dash-muted); line-height: 1.55; }
+.tracking-update-dialog { width: min(650px, calc(100% - 2rem)); }
+.tracking-update-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .85rem; }
+.tracking-update-grid .wide { grid-column: 1 / -1; }
+.tracking-update-grid select { width: 100%; min-height: 43px; }
+.delivery-status-selector { display: flex; align-items: end; gap: 1rem; padding: 1.15rem 1.25rem !important; }
+.delivery-status-selector label { flex: 1; margin: 0; }
+.delivery-status-selector select { width: 100%; min-height: 44px; }
+.delivery-status-activation { display: inline-flex; align-items: center; min-height: 31px; margin-bottom: .4rem; padding: .25rem .7rem; border: 1px solid #a6dbc4; border-radius: 7px; color: #0c6845; background: #e5f8ef; font-size: .72rem; font-weight: 850; text-transform: uppercase; }
+.delivery-status-activation.inactive { color: #6e6100; border-color: #eadb6b; background: #fff9cc; }
+.delivery-dashboard-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0; }
+.delivery-dashboard-stats article { min-height: 94px; display: flex; align-items: center; gap: .85rem; padding: 1rem 1.1rem !important; }
+.delivery-dashboard-stats small,
+.delivery-dashboard-stats strong { display: block; }
+.delivery-dashboard-stats small { color: var(--dash-muted); font-size: .78rem; }
+.delivery-dashboard-stats > article > div > strong { margin-top: .15rem; color: var(--dash-ink); font-size: 1.45rem; }
+.delivery-stat-icon { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 50%; font-size: 1.1rem; font-weight: 900; }
+.delivery-stat-icon.customers,
+.delivery-stat-icon.delivered { color: #087a4f; background: #e5f7ef; }
+.delivery-stat-icon.remaining { color: #b05e00; background: #fff3df; }
+.delivery-dashboard-stats .delivery-progress-ring { width: 50px; height: 50px; flex-basis: 50px; }
+.delivery-dashboard-board { padding: 1.25rem !important; }
+.delivery-dashboard-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.delivery-dashboard-heading h3 { margin: 0; color: var(--dash-ink); font-size: 1.15rem; }
+.delivery-dashboard-heading p { margin: .35rem 0 0; color: var(--dash-muted); font-size: .82rem; }
+.delivery-dashboard-filters { display: flex; gap: .45rem; padding: .25rem; border-radius: 9px; background: #f0f2f5; }
+.delivery-dashboard-filters button { min-height: 35px; padding: .45rem .75rem; color: #596275; background: transparent !important; box-shadow: none !important; font-size: .76rem; }
+.delivery-dashboard-filters button.active { color: #fff; background: #16875b !important; }
+.delivery-dashboard-list { overflow: hidden; border: 1px solid var(--dash-line); border-radius: 11px; }
+.delivery-dashboard-row { min-height: 82px; display: grid; grid-template-columns: auto minmax(150px, 1fr) auto minmax(190px, 1.2fr) auto; align-items: center; gap: .85rem; padding: .85rem 1rem; border-bottom: 1px solid var(--dash-line); background: #fff; }
+.delivery-dashboard-row.hidden { display: none; }
+.delivery-dashboard-row:last-child { border-bottom: 0; }
+.delivery-dashboard-row.delivered { background: #f6fcf9; }
+.delivery-dashboard-customer small,
+.delivery-dashboard-customer strong { display: block; }
+.delivery-dashboard-customer small { margin-bottom: .2rem; color: #41506a; font-size: .7rem; }
+.delivery-dashboard-customer strong { color: var(--dash-ink); font-size: .88rem; }
+.delivery-dashboard-row > p { margin: 0; color: var(--dash-muted); font-size: .78rem; }
+.delivery-dashboard-actions { display: flex; justify-content: flex-end; gap: .45rem; }
+.delivery-dashboard-actions button { min-width: max-content; }
+.delivery-auto-note { margin: 1rem 0 0; padding: .8rem 1rem; border: 1px solid #c8dbf6; border-radius: 10px; color: #28578f; background: #f2f7fd; font-size: .8rem; }
+.delivery-status-empty { padding: 2rem !important; text-align: center; }
+.delivery-status-empty h3 { margin: 0; color: var(--dash-ink); }
+.delivery-status-empty p { margin: .45rem 0 0; color: var(--dash-muted); }
+.delivery-details-dialog { width: min(760px, calc(100% - 2rem)); }
+.delivery-details-dialog > section { padding: 1.4rem; }
+.delivery-details-heading { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.delivery-details-heading h2 { margin: 0; font-size: 1.2rem; }
+.delivery-details-heading p { margin: .35rem 0 0; color: var(--dash-muted); font-size: .8rem; }
+.delivery-details-meta { display: grid; grid-template-columns: .7fr .7fr 2fr; gap: .7rem; margin-bottom: 1rem; }
+.delivery-details-meta div { padding: .75rem; border: 1px solid var(--dash-line); border-radius: 9px; background: #f8f9fb; }
+.delivery-details-meta small,
+.delivery-details-meta strong { display: block; }
+.delivery-details-meta small { color: var(--dash-muted); font-size: .68rem; text-transform: uppercase; }
+.delivery-details-meta strong { margin-top: .25rem; color: var(--dash-ink); font-size: .8rem; }
 #shipment-form h3 { margin-top: 0; color: var(--dash-ink); font-size: 1.2rem; }
 #shipment-form form,
 #employee-form,
@@ -241,6 +356,15 @@ input:focus { border-color: #b9a300 !important; box-shadow: 0 0 0 3px rgba(240,2
   #employee-form,
   #profile-settings-form { grid-template-columns: 1fr; }
   #profile-settings-form button { grid-column: auto; }
+  .tracking-search { grid-template-columns: 1fr 1fr; }
+  .tracking-search button { grid-column: 1 / -1; width: 100%; }
+  .tracking-stats { grid-template-columns: 1fr 1fr; }
+  .delivery-dashboard-stats { grid-template-columns: 1fr 1fr; }
+  .delivery-dashboard-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .delivery-dashboard-row > p { grid-column: 2 / -1; }
+  .delivery-dashboard-actions { grid-column: 2 / -1; justify-content: flex-start; }
+  .tracking-feature { grid-template-columns: 1fr; }
+  .tracking-route { border-top: 1px solid #dce6e1; border-left: 0; }
 }
 
 @media (max-width: 700px) {
@@ -269,6 +393,25 @@ input:focus { border-color: #b9a300 !important; box-shadow: 0 0 0 3px rgba(240,2
   .shipment { align-items: stretch !important; }
   .shipment button { width: 100%; }
   .shipment-actions { width: 100%; }
+  .tracking-search,
+  .tracking-stats,
+  .tracking-meta,
+  .custom-carrier-fields,
+  .tracking-update-grid { grid-template-columns: 1fr; }
+  .delivery-status-selector,
+  .delivery-dashboard-heading { align-items: stretch; flex-direction: column; }
+  .delivery-status-activation { align-self: flex-start; }
+  .delivery-dashboard-stats,
+  .delivery-details-meta { grid-template-columns: 1fr; }
+  .delivery-dashboard-filters { width: 100%; overflow-x: auto; }
+  .delivery-dashboard-filters button { flex: 1; min-width: max-content; }
+  .delivery-dashboard-row { grid-template-columns: auto 1fr; }
+  .delivery-dashboard-row .delivery-badge,
+  .delivery-dashboard-row > p,
+  .delivery-dashboard-actions { grid-column: 2; }
+  .delivery-dashboard-actions { flex-direction: column; }
+  .tracking-search button,
+  .tracking-update-grid .wide { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

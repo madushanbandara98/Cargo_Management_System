@@ -5,6 +5,19 @@ let editingItemId = null;
 let draftItems = [];
 let editingDraftItemIndex = null;
 let currentUser = null;
+let trackingRecords = [];
+let deliveryStatusRefreshTimer = null;
+
+const carrierTrackingUrls = {
+  Maersk: 'https://www.maersk.com/tracking/',
+  MSC: 'https://www.msc.com/track-a-shipment',
+  'Hapag-Lloyd': 'https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html',
+  'CMA CGM': 'https://www.cma-cgm.com/ebusiness/tracking',
+  ONE: 'https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking',
+  Evergreen: 'https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do',
+  COSCO: 'https://elines.coscoshipping.com/ebusiness/cargotracking',
+  OOCL: 'https://www.oocl.com/eng/ourservices/eservices/cargotracking/Pages/cargotracking.aspx'
+};
 
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
@@ -81,6 +94,13 @@ async function dashboard() {
   document.querySelector('#profile-settings-form').addEventListener('submit', saveProfileSettings);
   if (me.user.role === 'ADMIN') {
     const employeeButton = document.querySelector('#employees'); employeeButton.classList.remove('hidden'); employeeButton.onclick = () => { setActiveNavigation('employees'); showEmployeeManagement(); };
+    const trackingButton = document.querySelector('#shipment-tracking'); trackingButton.classList.remove('hidden'); trackingButton.onclick = () => { setActiveNavigation('shipment-tracking'); showShipmentTracking(); };
+    trackingButton.insertAdjacentHTML('afterend', '<button id="delivery-status" class="nav-button">Delivery status</button>');
+    document.querySelector('#employees-panel').insertAdjacentHTML('beforebegin', '<section id="delivery-status-panel" class="hidden"><div class="page-heading"><h2>Delivery status</h2><p>Monitor customer deliveries updated by employees.</p></div><section class="card delivery-status-selector"><label>Shipment<select id="delivery-status-shipment"><option value="">Select shipment</option></select></label><span id="delivery-status-activation" class="delivery-status-activation hidden">Active</span></section><div id="delivery-status-content"><section class="card delivery-status-empty"><h3>Select a shipment</h3><p>Choose a shipment above to view its customer delivery progress.</p></section></div></section>');
+    document.querySelector('#delivery-status').onclick = () => { setActiveNavigation('delivery-status'); showDeliveryStatus(); };
+    const sidebarNavigation = document.querySelector('.sidebar-nav');
+    sidebarNavigation.prepend(document.querySelector('#new-shipment'));
+    sidebarNavigation.append(document.querySelector('#settings'));
   } else {
     document.querySelector('#new-shipment').classList.add('hidden');
     document.querySelector('#settings').classList.add('hidden');
@@ -177,7 +197,6 @@ async function openShipment(shipment, pushHistory = true) {
   pageActionBar.append(customerActions);
   panel.append(pageActionBar);
   renderDocumentActions();
-  decorateAdminDeliveryStatuses(panel, consignments, shipment);
   enableCustomerAutofill(panel.querySelector('#consignment-form'));
   enableCustomerEnterNavigation(panel.querySelector('#consignment-form'));
   panel.querySelector('#consignment-form').addEventListener('submit', async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); values.allItemsEntered = Boolean(event.currentTarget.elements.allItemsEntered?.checked); const wasNewCustomer = !activeConsignment; try { activeConsignment = await api(`/api/shipments/${shipment.id}/consignments`, { method: 'POST', body: JSON.stringify(values) }); while (draftItems.length) { activeConsignment = await api(`/api/consignments/${activeConsignment.id}/items`, { method: 'POST', body: JSON.stringify(draftItems[0]) }); draftItems.shift(); } editingDraftItemIndex = null; renderItems(); await refreshSavedCustomers(panel, shipment); showToast(`${activeConsignment.customer_ref} — ${activeConsignment.customer_name} ${wasNewCustomer ? 'saved' : 'updated'} successfully.`); } catch (error) { message(event.currentTarget, error.message); } });
@@ -198,7 +217,6 @@ async function refreshSavedCustomers(panel, shipment) {
   const consignments = await api(`/api/shipments/${shipment.id}/consignments`);
   const section = panel.querySelector('.saved-customers');
   section.innerHTML = `<h3>Customers in this shipment</h3><div id="consignments">${consignments.length ? `<details id="customer-list-panel" class="customer-list-panel" open><summary><span>Customer list <span class="customer-count">${consignments.length}</span></span><span class="list-chevron" aria-hidden="true">⌄</span></summary><div class="customer-list-content"><label class="customer-search">Search customers<input id="customer-search" type="search" placeholder="Reference or name"></label><div class="customer-list">${consignments.map(c => `<div class="customer-row" data-customer-search="${escapeHtml(`${c.customer_ref} ${c.customer_name}`.toLowerCase())}"><button type="button" class="customer-load" data-consignment="${c.id}"><span><strong>${escapeHtml(c.customer_ref)} — ${escapeHtml(c.customer_name)}</strong><small>Load customer delivery</small></span><span class="load-arrow" aria-hidden="true">›</span></button><details class="customer-menu"><summary aria-label="Actions for ${escapeHtml(c.customer_ref)}">⋮</summary><button type="button" data-remove-consignment="${c.id}" data-customer-ref="${escapeHtml(c.customer_ref)}">Remove from shipment</button></details></div>`).join('')}</div></div></details>` : '<p>No customers added yet.</p>'}</div>`;
-  decorateAdminDeliveryStatuses(panel, consignments, shipment);
   section.querySelector('#customer-search')?.addEventListener('input', event => {
     const query = event.currentTarget.value.trim().toLowerCase();
     section.querySelectorAll('.customer-row').forEach(row => row.classList.toggle('hidden', !row.dataset.customerSearch.includes(query)));
@@ -315,8 +333,11 @@ function enableCustomerEnterNavigation(form) {
 }
 
 function showShipmentWorkspace() {
+  stopDeliveryStatusRefresh();
   document.querySelector('#settings-panel').classList.add('hidden');
   document.querySelector('#employees-panel').classList.add('hidden');
+  document.querySelector('#tracking-panel').classList.add('hidden');
+  document.querySelector('#delivery-status-panel')?.classList.add('hidden');
   document.querySelector('#shipment-workspace').classList.remove('hidden');
 }
 
@@ -335,19 +356,230 @@ function showNewShipmentForm() {
 }
 
 function showProfileSettings(user) {
+  stopDeliveryStatusRefresh();
   document.querySelector('#shipment-workspace').classList.add('hidden');
   document.querySelector('#employees-panel').classList.add('hidden');
+  document.querySelector('#tracking-panel').classList.add('hidden');
+  document.querySelector('#delivery-status-panel')?.classList.add('hidden');
   document.querySelector('#settings-panel').classList.remove('hidden');
   fillProfileSettings(user);
 }
 
 async function showEmployeeManagement() {
-  document.querySelector('#shipment-workspace').classList.add('hidden'); document.querySelector('#settings-panel').classList.add('hidden');
+  stopDeliveryStatusRefresh();
+  document.querySelector('#shipment-workspace').classList.add('hidden'); document.querySelector('#settings-panel').classList.add('hidden'); document.querySelector('#tracking-panel').classList.add('hidden'); document.querySelector('#delivery-status-panel')?.classList.add('hidden');
   const panel = document.querySelector('#employees-panel'); panel.classList.remove('hidden');
-  if (!document.querySelector('#employee-management-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="employee-management-styles">.employee-card{display:flex;align-items:center;justify-content:space-between;gap:1rem}.employee-card p{margin:.35rem 0 0}.status-dot{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;margin-right:.45rem;background:#aab1bd}.status-dot.online{background:#18a957;box-shadow:0 0 0 3px #18a95722}</style>');
-  const list = panel.querySelector('#employee-list'); const render = async () => { const employees = await api('/api/employees'); list.innerHTML = employees.length ? employees.map(employee => `<article class="card employee-card"><div><strong><span class="status-dot ${employee.active ? 'online' : ''}" title="${employee.active ? 'Active now' : 'Offline'}"></span>${escapeHtml(employee.full_name)}</strong><p>${escapeHtml(employee.username)} · ${employee.active ? 'Active now' : 'Offline'}</p></div><button class="secondary" data-remove-employee="${employee.id}">Remove</button></article>`).join('') : '<p>No employee accounts yet.</p>'; list.querySelectorAll('[data-remove-employee]').forEach(button => button.onclick = async () => { if (!confirm('Remove this employee account?')) return; try { await api(`/api/employees/${button.dataset.removeEmployee}`, { method: 'DELETE' }); await render(); } catch (error) { message(panel, error.message); } }); };
+  if (!document.querySelector('#employee-management-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="employee-management-styles">.employee-card{display:flex;align-items:center;justify-content:space-between;gap:1rem}.employee-card p{margin:.35rem 0 0}.employee-actions{display:flex;gap:.5rem}.status-dot{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;margin-right:.45rem;background:#aab1bd}.status-dot.enabled{background:#18a957;box-shadow:0 0 0 3px #18a95722}.employee-edit-dialog{width:min(540px,calc(100% - 2rem))}.employee-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:.85rem}.employee-edit-grid .wide{grid-column:1/-1}@media(max-width:600px){.employee-card{align-items:stretch;flex-direction:column}.employee-actions{display:grid;grid-template-columns:1fr 1fr}.employee-edit-grid{grid-template-columns:1fr}.employee-edit-grid .wide{grid-column:auto}}</style>');
+  const list = panel.querySelector('#employee-list');
+  const render = async () => {
+    const employees = await api('/api/employees');
+    list.innerHTML = employees.length ? employees.map(employee => `<article class="card employee-card"><div><strong><span class="status-dot ${employee.enabled ? 'enabled' : ''}" title="${employee.enabled ? 'Account enabled' : 'Account disabled'}"></span>${escapeHtml(employee.full_name)}</strong><p>${escapeHtml(employee.username)} · ${employee.enabled ? 'Account enabled' : 'Account disabled'}</p></div><div class="employee-actions"><button class="secondary" data-edit-employee="${employee.id}">Edit</button><button class="secondary" data-remove-employee="${employee.id}">Remove</button></div></article>`).join('') : '<p>No employee accounts yet.</p>';
+    list.querySelectorAll('[data-edit-employee]').forEach(button => button.onclick = () => showEditEmployeeDialog(employees.find(employee => employee.id === button.dataset.editEmployee), render));
+    list.querySelectorAll('[data-remove-employee]').forEach(button => button.onclick = async () => { if (!confirm('Remove this employee account?')) return; try { await api(`/api/employees/${button.dataset.removeEmployee}`, { method: 'DELETE' }); await render(); } catch (error) { message(panel, error.message); } });
+  };
   panel.querySelector('#employee-form').onsubmit = async event => { event.preventDefault(); try { await api('/api/employees', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); event.currentTarget.reset(); await render(); } catch (error) { message(event.currentTarget, error.message); } };
   await render();
+}
+
+function showEditEmployeeDialog(employee, onSaved) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog employee-edit-dialog';
+  dialog.innerHTML = `<form><h2>Edit employee</h2><p>Update account details or set a new password for ${escapeHtml(employee.full_name)}.</p><div class="employee-edit-grid"><label>Employee name<input name="fullName" value="${escapeHtml(employee.full_name)}" required></label><label>Username<input name="username" value="${escapeHtml(employee.username)}" required></label><label>Account status<select name="enabled"><option value="true" ${employee.enabled ? 'selected' : ''}>Enabled</option><option value="false" ${employee.enabled ? '' : 'selected'}>Disabled</option></select></label><label>New password<input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Leave blank to keep current"></label></div><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button>Save changes</button></div></form>`;
+  document.body.append(dialog);
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.querySelector('form').onsubmit = async event => {
+    event.preventDefault();
+    try {
+      await api(`/api/employees/${employee.id}`, { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      dialog.close(); await onSaved(); showToast('Employee account updated.');
+    } catch (error) { message(event.currentTarget, error.message); }
+  };
+  dialog.showModal();
+}
+
+async function showShipmentTracking() {
+  stopDeliveryStatusRefresh();
+  document.querySelector('#shipment-workspace').classList.add('hidden');
+  document.querySelector('#employees-panel').classList.add('hidden');
+  document.querySelector('#settings-panel').classList.add('hidden');
+  document.querySelector('#delivery-status-panel')?.classList.add('hidden');
+  const panel = document.querySelector('#tracking-panel');
+  panel.classList.remove('hidden');
+  const form = panel.querySelector('#tracking-search-form');
+  const carrierSelect = form.elements.carrier;
+  const customFields = form.querySelector('.custom-carrier-fields');
+  const toggleCustomCarrier = () => {
+    const custom = carrierSelect.value === 'OTHER';
+    customFields.classList.toggle('hidden', !custom);
+    form.elements.customCarrier.required = custom;
+    form.elements.trackingUrl.required = custom;
+  };
+  carrierSelect.onchange = toggleCustomCarrier;
+  toggleCustomCarrier();
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    const submit = form.querySelector('button');
+    submit.disabled = true;
+    submit.textContent = 'Saving…';
+    try {
+      const record = await api('/api/shipment-tracking', { method: 'POST', body: JSON.stringify(data) });
+      form.reset();
+      toggleCustomCarrier();
+      await loadTrackingRecords(record.id);
+      await openOfficialTracking(record);
+    } catch (error) { message(form, error.message); }
+    finally { submit.disabled = false; submit.textContent = 'Track shipment'; }
+  };
+  await loadTrackingRecords();
+}
+
+async function loadTrackingRecords(selectedId) {
+  trackingRecords = await api('/api/shipment-tracking');
+  renderTrackingSummary(trackingRecords.find(record => record.id === selectedId) || trackingRecords[0]);
+  renderTrackingList();
+}
+
+function trackingStatusLabel(status) {
+  return ({ NOT_UPDATED: 'Not updated', IN_TRANSIT: 'In transit', DELAYED: 'Delayed', ARRIVING_SOON: 'Arriving soon', DELIVERED: 'Delivered' })[status] || status;
+}
+
+function renderTrackingSummary(record) {
+  const summary = document.querySelector('#tracking-summary');
+  const counts = status => trackingRecords.filter(item => item.status === status).length;
+  const stats = `<div class="tracking-stats"><article><span class="tracking-stat-icon in-transit">↗</span><div><small>In transit</small><strong>${counts('IN_TRANSIT')}</strong></div></article><article><span class="tracking-stat-icon delayed">!</span><div><small>Delayed</small><strong>${counts('DELAYED')}</strong></div></article><article><span class="tracking-stat-icon arriving">⌁</span><div><small>Arriving soon</small><strong>${counts('ARRIVING_SOON')}</strong></div></article><article><span class="tracking-stat-icon delivered">✓</span><div><small>Delivered</small><strong>${counts('DELIVERED')}</strong></div></article></div>`;
+  if (!record) {
+    summary.innerHTML = `${stats}<section class="card tracking-empty"><div class="tracking-empty-icon">⌖</div><h3>No containers tracked yet</h3><p>Enter a container number and carrier above to begin. You can then record updates from the carrier's official tracking page.</p></section>`;
+    return;
+  }
+  const updated = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.updated_at));
+  const eta = record.eta ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(record.eta)) : 'Not set';
+  summary.innerHTML = `${stats}<section class="card tracking-feature"><div class="tracking-feature-main"><div class="tracking-title"><h3>${escapeHtml(record.container_number)}</h3><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span></div><h4>${escapeHtml(record.origin || 'Origin not set')} <span>→</span> ${escapeHtml(record.destination || 'Destination not set')}</h4><p class="tracking-latest">⌖ ${escapeHtml(record.latest_status || 'Not updated')}</p><div class="tracking-meta"><div><small>Carrier</small><strong>${escapeHtml(record.carrier)}</strong></div><div><small>Vessel</small><strong>${escapeHtml(record.vessel || 'Not set')}</strong></div><div><small>Updated</small><strong>${escapeHtml(updated)}</strong></div><div><small>ETA</small><strong>${escapeHtml(eta)}</strong></div></div><div class="tracking-feature-actions"><button class="secondary" data-update-tracking="${record.id}">Update status</button><button data-open-carrier="${record.id}">Open carrier tracking ↗</button></div></div><div class="tracking-route"><div class="route-line"><span></span><i></i><span></span></div><div class="route-labels"><strong>${escapeHtml(record.origin || 'Origin')}</strong><strong>${escapeHtml(record.destination || 'Destination')}</strong></div><p>Manual tracking record</p><small>Use the official carrier page for the latest confirmed movement, then update this record.</small></div></section>`;
+  bindTrackingActions(summary);
+}
+
+function renderTrackingList() {
+  const list = document.querySelector('#tracking-list');
+  if (!trackingRecords.length) { list.innerHTML = '<p class="tracking-list-empty">No tracked shipments yet.</p>'; return; }
+  const date = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value)) : '—';
+  list.innerHTML = `<div class="tracking-table-wrap"><table class="table tracking-table"><thead><tr><th>Container</th><th>Carrier</th><th>Route</th><th>Latest status</th><th>ETA</th><th>Action</th></tr></thead><tbody>${trackingRecords.map(record => `<tr><td><strong>${escapeHtml(record.container_number)}</strong></td><td>${escapeHtml(record.carrier)}</td><td>${escapeHtml(record.origin || '—')} → ${escapeHtml(record.destination || '—')}</td><td><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span><small>${escapeHtml(record.latest_status)}</small></td><td>${escapeHtml(date(record.eta))}</td><td><div class="tracking-row-actions"><button class="secondary" data-view-tracking="${record.id}">View status</button><button class="tracking-menu-button" data-update-tracking="${record.id}" aria-label="Update ${escapeHtml(record.container_number)}">✎</button><button class="tracking-remove-button" data-remove-tracking="${record.id}" aria-label="Remove ${escapeHtml(record.container_number)}">×</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  bindTrackingActions(list);
+}
+
+function bindTrackingActions(node) {
+  node.querySelectorAll('[data-view-tracking]').forEach(button => button.onclick = () => renderTrackingSummary(trackingRecords.find(record => record.id === button.dataset.viewTracking)));
+  node.querySelectorAll('[data-update-tracking]').forEach(button => button.onclick = () => showTrackingUpdateDialog(trackingRecords.find(record => record.id === button.dataset.updateTracking)));
+  node.querySelectorAll('[data-open-carrier]').forEach(button => button.onclick = () => openOfficialTracking(trackingRecords.find(record => record.id === button.dataset.openCarrier)));
+  node.querySelectorAll('[data-remove-tracking]').forEach(button => button.onclick = async () => {
+    const record = trackingRecords.find(item => item.id === button.dataset.removeTracking);
+    if (!confirm(`Stop tracking ${record.container_number}?`)) return;
+    try { await api(`/api/shipment-tracking/${record.id}`, { method: 'DELETE' }); await loadTrackingRecords(); showToast('Tracking record removed.'); }
+    catch (error) { message(document.querySelector('#tracking-panel'), error.message); }
+  });
+}
+
+async function openOfficialTracking(record) {
+  const url = record.tracking_url || carrierTrackingUrls[record.carrier];
+  if (!url) return showToast('Official tracking page is not configured for this carrier.', 'error');
+  try { await navigator.clipboard.writeText(record.container_number); } catch {}
+  window.open(url, '_blank', 'noopener');
+  showToast(`Container ${record.container_number} copied. Paste it into the carrier tracking page.`);
+}
+
+function showTrackingUpdateDialog(record) {
+  if (!record) return;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog tracking-update-dialog';
+  const eta = record.eta ? new Date(record.eta).toISOString().slice(0, 10) : '';
+  dialog.innerHTML = `<form><h2>Update tracking status</h2><p>${escapeHtml(record.container_number)} · ${escapeHtml(record.carrier)}</p><div class="tracking-update-grid"><label>Status<select name="status" required>${['NOT_UPDATED', 'IN_TRANSIT', 'DELAYED', 'ARRIVING_SOON', 'DELIVERED'].map(status => `<option value="${status}" ${record.status === status ? 'selected' : ''}>${trackingStatusLabel(status)}</option>`).join('')}</select></label><label>ETA<input name="eta" type="date" value="${eta}"></label><label>Origin<input name="origin" value="${escapeHtml(record.origin)}" placeholder="Hamburg"></label><label>Destination<input name="destination" value="${escapeHtml(record.destination)}" placeholder="Colombo"></label><label>Vessel<input name="vessel" value="${escapeHtml(record.vessel)}" placeholder="Vessel name"></label><label class="wide">Latest status<input name="latestStatus" value="${escapeHtml(record.latest_status)}" placeholder="Vessel departed Hamburg"></label></div><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button>Save update</button></div></form>`;
+  document.body.append(dialog);
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.querySelector('form').onsubmit = async event => {
+    event.preventDefault();
+    try {
+      const updated = await api(`/api/shipment-tracking/${record.id}`, { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      dialog.close(); await loadTrackingRecords(updated.id); showToast('Tracking status updated.');
+    } catch (error) { message(event.currentTarget, error.message); }
+  };
+  dialog.showModal();
+}
+
+async function showDeliveryStatus() {
+  document.querySelector('#shipment-workspace').classList.add('hidden');
+  document.querySelector('#employees-panel').classList.add('hidden');
+  document.querySelector('#settings-panel').classList.add('hidden');
+  document.querySelector('#tracking-panel').classList.add('hidden');
+  const panel = document.querySelector('#delivery-status-panel');
+  panel.classList.remove('hidden');
+  const select = panel.querySelector('#delivery-status-shipment');
+  const shipments = await api('/api/shipments');
+  const previousSelection = select.value;
+  select.innerHTML = `<option value="">Select shipment</option>${shipments.map(shipment => `<option value="${shipment.id}">${escapeHtml(shipment.name)} · ${escapeHtml(shipment.reference)}</option>`).join('')}`;
+  select.value = shipments.some(shipment => shipment.id === previousSelection) ? previousSelection : (shipments[0]?.id || '');
+  select.onchange = () => renderDeliveryStatusShipment(shipments.find(shipment => shipment.id === select.value));
+  await renderDeliveryStatusShipment(shipments.find(shipment => shipment.id === select.value));
+  stopDeliveryStatusRefresh();
+  deliveryStatusRefreshTimer = window.setInterval(async () => {
+    if (panel.classList.contains('hidden') || !select.value) return;
+    const shipment = shipments.find(item => item.id === select.value);
+    try { await renderDeliveryStatusShipment(shipment, true); } catch {}
+  }, 15000);
+}
+
+function stopDeliveryStatusRefresh() {
+  if (!deliveryStatusRefreshTimer) return;
+  window.clearInterval(deliveryStatusRefreshTimer);
+  deliveryStatusRefreshTimer = null;
+}
+
+async function renderDeliveryStatusShipment(shipment, silent = false) {
+  const content = document.querySelector('#delivery-status-content');
+  const activation = document.querySelector('#delivery-status-activation');
+  if (!shipment) {
+    activation.classList.add('hidden');
+    content.innerHTML = '<section class="card delivery-status-empty"><h3>Select a shipment</h3><p>Choose a shipment above to view its customer delivery progress.</p></section>';
+    return;
+  }
+  const sameShipment = content.dataset.shipmentId === shipment.id;
+  const activeFilter = sameShipment ? (content.querySelector('[data-dashboard-delivery-filter].active')?.dataset.dashboardDeliveryFilter || 'ALL') : 'ALL';
+  content.dataset.shipmentId = shipment.id;
+  if (!silent) content.innerHTML = '<section class="card delivery-status-empty"><p>Loading delivery status…</p></section>';
+  const customers = await api(`/api/shipments/${shipment.id}/consignments`);
+  const delivered = customers.filter(customer => customer.delivery_status === 'DELIVERED').length;
+  const remaining = customers.length - delivered;
+  const percentage = customers.length ? Math.round(delivered / customers.length * 100) : 0;
+  activation.textContent = shipment.status === 'ACTIVE' ? 'Active' : 'Not active';
+  activation.classList.toggle('inactive', shipment.status !== 'ACTIVE');
+  activation.classList.remove('hidden');
+  content.innerHTML = `<div class="delivery-dashboard-stats"><article class="card"><span class="delivery-stat-icon customers">♟</span><div><small>Customers</small><strong>${customers.length}</strong></div></article><article class="card"><span class="delivery-stat-icon delivered">✓</span><div><small>Delivered</small><strong>${delivered}</strong></div></article><article class="card"><span class="delivery-stat-icon remaining">◷</span><div><small>Remaining</small><strong>${remaining}</strong></div></article><article class="card"><span class="delivery-progress-ring" style="--progress:${percentage}%"><strong>${percentage}%</strong></span><div><small>Progress</small><strong>${percentage}%</strong></div></article></div><section class="card delivery-dashboard-board"><div class="delivery-dashboard-heading"><div><h3>Customer deliveries</h3><p>${delivered} of ${customers.length} customers delivered</p></div><div class="delivery-dashboard-filters" role="group" aria-label="Filter delivery status"><button class="active" data-dashboard-delivery-filter="ALL">All ${customers.length}</button><button data-dashboard-delivery-filter="PENDING">Remaining ${remaining}</button><button data-dashboard-delivery-filter="DELIVERED">Delivered ${delivered}</button></div></div><div class="delivery-progress-track"><span style="width:${percentage}%"></span></div><div class="delivery-dashboard-list">${customers.map(customer => adminDeliveryStatusRow(customer)).join('') || '<p class="delivery-empty">No customers have been added to this shipment.</p>'}</div></section><p class="delivery-auto-note">ⓘ Updates appear automatically when employees mark deliveries complete.</p>`;
+  content.querySelectorAll('[data-dashboard-delivery-filter]').forEach(button => button.onclick = () => {
+    content.querySelectorAll('[data-dashboard-delivery-filter]').forEach(filter => filter.classList.toggle('active', filter === button));
+    content.querySelectorAll('[data-dashboard-delivery-row]').forEach(row => row.classList.toggle('hidden', button.dataset.dashboardDeliveryFilter !== 'ALL' && row.dataset.status !== button.dataset.dashboardDeliveryFilter));
+  });
+  content.querySelector(`[data-dashboard-delivery-filter="${activeFilter}"]`)?.click();
+  content.querySelectorAll('[data-delivery-details]').forEach(button => button.onclick = () => showAdminDeliveryDetails(button.dataset.deliveryDetails));
+  content.querySelectorAll('[data-reopen-dashboard-delivery]').forEach(button => {
+    const customer = customers.find(item => item.id === button.dataset.reopenDashboardDelivery);
+    button.onclick = () => reopenDelivery(customer, () => renderDeliveryStatusShipment(shipment));
+  });
+}
+
+function adminDeliveryStatusRow(customer) {
+  const delivered = customer.delivery_status === 'DELIVERED';
+  return `<article class="delivery-dashboard-row ${delivered ? 'delivered' : ''}" data-dashboard-delivery-row data-status="${customer.delivery_status}"><span class="delivery-check" aria-hidden="true">${delivered ? '✓' : ''}</span><div class="delivery-dashboard-customer"><small>${escapeHtml(customer.customer_ref)}</small><strong>${escapeHtml(customer.customer_name)}</strong></div><span class="delivery-badge ${delivered ? 'delivered' : 'pending'}">${delivered ? 'Delivered' : 'Remaining'}</span><p>${escapeHtml(delivered ? deliveredAudit(customer) : 'Waiting for delivery')}</p><div class="delivery-dashboard-actions"><button class="secondary" data-delivery-details="${customer.id}">Open details</button>${delivered ? `<button class="secondary" data-reopen-dashboard-delivery="${customer.id}">Reopen delivery</button>` : ''}</div></article>`;
+}
+
+async function showAdminDeliveryDetails(consignmentId) {
+  const delivery = await api(`/api/consignments/${consignmentId}`);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog delivery-details-dialog';
+  dialog.innerHTML = `<section><div class="delivery-details-heading"><div><h2>${escapeHtml(delivery.customer_ref)} — ${escapeHtml(delivery.customer_name)}</h2><p>${escapeHtml(delivery.delivery_status === 'DELIVERED' ? deliveredAudit(delivery) : 'Waiting for delivery')}</p></div><button type="button" class="secondary" data-close>Close</button></div><div class="delivery-details-meta"><div><small>Total items</small><strong>${delivery.total_items}</strong></div><div><small>Total volume</small><strong>${delivery.total_cubic.toFixed(3)} m³</strong></div><div><small>Address</small><strong>${escapeHtml(delivery.sri_lankan_address || delivery.german_address || '—')}</strong></div></div><div class="tracking-table-wrap"><table class="table"><thead><tr><th>Description</th><th>Dimensions</th><th>Quantity</th></tr></thead><tbody>${delivery.items.map(item => `<tr><td>${escapeHtml(item.description || 'Cargo item')}</td><td>${item.height_cm} × ${item.width_cm} × ${item.depth_cm} cm</td><td>${item.quantity}</td></tr>`).join('') || '<tr><td colspan="3">No items added.</td></tr>'}</tbody></table></div></section>`;
+  document.body.append(dialog);
+  dialog.querySelector('[data-close]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
 }
 
 async function openEmployeeShipment(shipment, pushHistory = true) {

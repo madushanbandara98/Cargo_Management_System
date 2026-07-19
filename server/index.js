@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
 import PDFDocument from 'pdfkit';
 import { connectMongo } from './mongo/connection.js';
-import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, nextMongoSourceId } from './mongo/models.js';
+import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, ShipmentTracking, nextMongoSourceId } from './mongo/models.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -41,7 +41,7 @@ async function sessionUser(req) {
   try { payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }); }
   catch { return null; }
   const user = await User.findById(payload.sub);
-  return user ? publicUser(user) : null;
+  return user && user.enabled !== false ? publicUser(user) : null;
 }
 
 async function requireAuth(req, res, next) {
@@ -70,6 +70,32 @@ function number(value, name, { min = 0, integer = false } = {}) {
     throw new Error(`${name} must be a valid ${integer ? 'whole ' : ''}number.`);
   }
   return result;
+}
+
+function containerNumber(value) {
+  const normalized = text(value, 'Container number', { required: true }).replace(/[\s-]/g, '').toUpperCase();
+  if (!/^[A-Z]{4}\d{7}$/.test(normalized)) throw new Error('Enter a valid container number with 4 letters and 7 digits.');
+  const letterValue = letter => {
+    const raw = letter.charCodeAt(0) - 55;
+    return raw + Math.floor((raw - 1) / 10);
+  };
+  const characters = normalized.slice(0, 10);
+  const total = [...characters].reduce((sum, character, index) => {
+    const value = /\d/.test(character) ? Number(character) : letterValue(character);
+    return sum + value * (2 ** index);
+  }, 0);
+  const expected = (total % 11) % 10;
+  if (expected !== Number(normalized[10])) throw new Error('The container number check digit is incorrect.');
+  return normalized;
+}
+
+function presentTracking(row) {
+  return {
+    id: row._id.toString(), container_number: row.containerNumber, carrier: row.carrier, tracking_url: row.trackingUrl,
+    origin: row.origin, destination: row.destination, vessel: row.vessel,
+    latest_status: row.latestStatus, status: row.status, eta: row.eta,
+    created_at: row.createdAt, updated_at: row.updatedAt
+  };
 }
 
 function escapeHtml(value) {
@@ -148,7 +174,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   const username = text(req.body.username, 'Username', { required: true });
   const password = String(req.body.password ?? '');
   const user = await User.findOne({ username: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).select('+passwordHash');
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid username or password.' });
+  if (!user || user.enabled === false || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid username or password.' });
   const token = jwt.sign({}, jwtSecret(), { algorithm: 'HS256', subject: user._id.toString(), expiresIn: '8h' });
   res.cookie('cargo_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 });
   res.json({ user: publicUser(user) });
@@ -180,7 +206,7 @@ app.put('/api/profile', requireAuth, requireAdmin, async (req, res) => {
 
 app.get('/api/employees', requireAuth, requireAdmin, async (req, res) => {
   const employees = await User.find({ role: 'USER' }).sort({ createdAt: -1 }).lean();
-  res.json(employees.map(employee => ({ id: employee._id.toString(), username: employee.username, full_name: employee.fullName, created_at: employee.createdAt, active: false })));
+  res.json(employees.map(employee => ({ id: employee._id.toString(), username: employee.username, full_name: employee.fullName, created_at: employee.createdAt, enabled: employee.enabled !== false, active: false })));
 });
 
 app.post('/api/employees', requireAuth, requireAdmin, async (req, res) => {
@@ -196,6 +222,25 @@ app.post('/api/employees', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/employees/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const employee = await User.findOne({ _id: req.params.id, role: 'USER' }).select('+passwordHash');
+    if (!employee) return res.status(404).json({ error: 'Employee not found.' });
+    employee.fullName = text(req.body.fullName, 'Employee name', { required: true });
+    employee.username = text(req.body.username, 'Username', { required: true });
+    employee.enabled = String(req.body.enabled) === 'true';
+    const password = String(req.body.password ?? '');
+    if (password) {
+      if (password.length < 8) throw new Error('Password must have at least 8 characters.');
+      employee.passwordHash = bcrypt.hashSync(password, 12);
+    }
+    await employee.save();
+    res.json({ id: employee._id.toString(), username: employee.username, full_name: employee.fullName, created_at: employee.createdAt, enabled: employee.enabled, active: false });
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That username is already in use.' : error.message });
+  }
+});
+
 app.delete('/api/employees/:id', requireAuth, requireAdmin, async (req, res) => {
   const employeeId = req.params.id;
   const employee = await User.findOne({ _id: employeeId, role: 'USER' });
@@ -203,6 +248,62 @@ app.delete('/api/employees/:id', requireAuth, requireAdmin, async (req, res) => 
   const referenced = await Promise.all([Container.exists({ createdBy: employeeId }), Invoice.exists({ issuedBy: employeeId }), Consignment.exists({ deliveredBy: employeeId })]);
   if (referenced.some(Boolean)) return res.status(409).json({ error: 'Employee cannot be removed because they created shipments or invoices.' });
   await employee.deleteOne();
+  res.status(204).end();
+});
+
+app.get('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) => {
+  const records = await ShipmentTracking.find().sort({ updatedAt: -1 }).lean();
+  res.json(records.map(presentTracking));
+});
+
+app.post('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const normalized = containerNumber(req.body.containerNumber);
+    let carrier = text(req.body.carrier, 'Carrier', { required: true });
+    const supportedCarriers = ['Maersk', 'MSC', 'Hapag-Lloyd', 'CMA CGM', 'ONE', 'Evergreen', 'COSCO', 'OOCL'];
+    let trackingUrl = '';
+    if (carrier === 'OTHER') {
+      carrier = text(req.body.customCarrier, 'Carrier name', { required: true });
+      trackingUrl = text(req.body.trackingUrl, 'Official tracking URL', { required: true });
+      let parsedUrl;
+      try { parsedUrl = new URL(trackingUrl); } catch { throw new Error('Enter a valid official tracking URL.'); }
+      if (parsedUrl.protocol !== 'https:') throw new Error('The official tracking URL must start with https://.');
+      trackingUrl = parsedUrl.toString();
+    } else if (!supportedCarriers.includes(carrier)) throw new Error('Select a supported carrier.');
+    const existing = await ShipmentTracking.findOne({ containerNumber: normalized });
+    if (existing) return res.json(presentTracking(existing));
+    const now = new Date();
+    const record = await ShipmentTracking.create({
+      sqliteId: await nextMongoSourceId(ShipmentTracking), containerNumber: normalized,
+      carrier, trackingUrl, createdBy: req.user.id, createdAt: now, updatedAt: now
+    });
+    res.status(201).json(presentTracking(record));
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'This container is already being tracked.' : error.message });
+  }
+});
+
+app.put('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowedStatuses = ['NOT_UPDATED', 'IN_TRANSIT', 'DELAYED', 'ARRIVING_SOON', 'DELIVERED'];
+    const status = text(req.body.status, 'Status', { required: true }).toUpperCase();
+    if (!allowedStatuses.includes(status)) throw new Error('Select a valid tracking status.');
+    const etaText = text(req.body.eta, 'ETA');
+    const eta = etaText ? new Date(`${etaText}T00:00:00.000Z`) : null;
+    if (etaText && Number.isNaN(eta.getTime())) throw new Error('Enter a valid ETA.');
+    const record = await ShipmentTracking.findByIdAndUpdate(req.params.id, {
+      origin: text(req.body.origin, 'Origin'), destination: text(req.body.destination, 'Destination'),
+      vessel: text(req.body.vessel, 'Vessel'), latestStatus: text(req.body.latestStatus, 'Latest status') || 'Not updated',
+      status, eta, updatedAt: new Date()
+    }, { new: true, runValidators: true });
+    if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
+    res.json(presentTracking(record));
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.delete('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, res) => {
+  const record = await ShipmentTracking.findByIdAndDelete(req.params.id);
+  if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
   res.status(204).end();
 });
 
