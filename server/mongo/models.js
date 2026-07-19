@@ -60,6 +60,7 @@ const consignmentSchema = new Schema({
   customer: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
   ratePerCubic: { type: Number, required: true, min: 0 },
   deliveryCharge: { type: Number, required: true, min: 0 },
+  discount: { type: Number, required: true, min: 0, default: 0 },
   allItemsEntered: { type: Boolean, required: true },
   deliveryStatus: { type: String, required: true, enum: ['PENDING', 'DELIVERED'], default: 'PENDING' },
   deliveredAt: { type: Date, default: null },

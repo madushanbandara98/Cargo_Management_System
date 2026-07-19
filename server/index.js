@@ -119,14 +119,16 @@ async function presentConsignment(id) {
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const totalCubic = items.reduce((sum, item) => sum + (item.height_cm * item.width_cm * item.depth_cm / 1_000_000 * item.quantity), 0);
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
-  const finalTotal = Number((totalAmount + summary.deliveryCharge).toFixed(2));
+  const grossTotal = Number((totalAmount + summary.deliveryCharge).toFixed(2));
+  const discount = Number(Math.min(summary.discount || 0, grossTotal).toFixed(2));
+  const finalTotal = Number((grossTotal - discount).toFixed(2));
   const payments = await Payment.find({ consignment: summary._id }).populate('recordedBy voidedBy', 'username fullName').sort({ paymentDate: -1, createdAt: -1 }).lean();
   const amountPaid = Number(payments.filter(payment => payment.status !== 'VOID').reduce((sum, payment) => sum + payment.amount, 0).toFixed(2));
   const balanceDue = Number(Math.max(0, finalTotal - amountPaid).toFixed(2));
   const paymentStatus = amountPaid <= 0 ? 'UNPAID' : balanceDue > 0 ? 'PARTIALLY_PAID' : 'PAID';
   return {
     id: summary._id.toString(), shipment_id: summary.container._id.toString(), customer_id: summary.customer._id.toString(),
-    rate_per_cubic: summary.ratePerCubic, delivery_charge: summary.deliveryCharge,
+    rate_per_cubic: summary.ratePerCubic, delivery_charge: summary.deliveryCharge, discount,
     all_items_entered: summary.allItemsEntered, delivery_status: summary.deliveryStatus || 'PENDING',
     delivered_at: summary.deliveredAt || null,
     delivered_by: summary.deliveredBy ? { id: summary.deliveredBy._id.toString(), username: summary.deliveredBy.username, full_name: summary.deliveredBy.fullName } : null,
@@ -136,27 +138,45 @@ async function presentConsignment(id) {
     customer_identity: summary.customer.identityNumber, german_address: summary.customer.germanAddress,
     sri_lankan_address: summary.customer.sriLankanAddress, phone_de: summary.customer.phoneDE,
     phone_lk: summary.customer.phoneLK, total_cubic: Number(totalCubic.toFixed(3)), total_items: totalItems,
-    items, total_amount: Number(totalAmount.toFixed(2)), final_total: finalTotal,
+    items, total_amount: Number(totalAmount.toFixed(2)), gross_total: grossTotal, final_total: finalTotal,
     payment_status: paymentStatus, amount_paid: amountPaid, balance_due: balanceDue,
     payments: payments.map(payment => ({ id: payment._id.toString(), amount: payment.amount, method: payment.method, payment_date: payment.paymentDate, reference: payment.reference, notes: payment.notes, status: payment.status || 'ACTIVE', recorded_by: payment.recordedBy ? (payment.recordedBy.fullName || payment.recordedBy.username) : '', voided_by: payment.voidedBy ? (payment.voidedBy.fullName || payment.voidedBy.username) : '', voided_at: payment.voidedAt, void_reason: payment.voidReason, created_at: payment.createdAt }))
   };
 }
 
 function invoiceSnapshot(consignment, user) {
+  const issuedDate = new Date();
+  const paymentTermsDays = Number(user.payment_terms_days ?? 14);
+  const dueDate = new Date(issuedDate);
+  dueDate.setUTCDate(dueDate.getUTCDate() + paymentTermsDays);
   return {
     business: {
       name: user.business_name || 'Asanka Cargo',
+      tagline: user.business_tagline || 'Transport goods from Germany to Sri Lanka',
+      logo: user.business_logo || '',
       contactName: user.full_name || user.username,
-      phone: user.phone,
+      phoneGermany: user.phone,
+      phoneSriLanka: user.phone_sri_lanka,
       email: user.email,
-      address: user.business_address
+      website: user.website,
+      germanAddress: user.business_address,
+      sriLankanAddress: user.sri_lankan_address,
+      registrationNumber: user.registration_number,
+      vatNumber: user.vat_number,
+      bankName: user.bank_name,
+      accountHolder: user.account_holder,
+      iban: user.iban,
+      bic: user.bic,
+      accentColor: user.invoice_accent_color || '#0D2B45'
     },
     customer: {
       reference: consignment.customer_ref,
       name: consignment.customer_name,
       identity: consignment.customer_identity,
-      address: consignment.sri_lankan_address || consignment.german_address,
-      phone: consignment.phone_lk || consignment.phone_de
+      germanAddress: consignment.german_address,
+      sriLankanAddress: consignment.sri_lankan_address,
+      phoneGermany: consignment.phone_de,
+      phoneSriLanka: consignment.phone_lk
     },
     shipment: { name: consignment.shipment_name, reference: consignment.shipment_reference },
     items: consignment.items,
@@ -164,11 +184,17 @@ function invoiceSnapshot(consignment, user) {
     totalItems: consignment.total_items,
     ratePerCubic: consignment.rate_per_cubic,
     deliveryCharge: consignment.delivery_charge,
+    discount: consignment.discount,
+    grossTotal: consignment.gross_total,
     itemsTotal: consignment.total_amount,
     finalTotal: consignment.final_total,
-    currency: 'EUR',
-    issuedDate: new Date(),
-    paymentTerms: 'Due on receipt'
+    amountPaid: consignment.amount_paid,
+    balanceDue: consignment.balance_due,
+    paymentStatus: consignment.payment_status,
+    currency: user.default_currency || 'EUR',
+    issuedDate,
+    dueDate,
+    paymentTerms: paymentTermsDays === 0 ? 'Due on receipt' : `${paymentTermsDays} days`
   };
 }
 
@@ -594,6 +620,20 @@ app.get('/api/consignments/:id/payments', requireAuth, requireAdmin, async (req,
   res.json({ status: consignment.payment_status, invoiceTotal: consignment.final_total, amountPaid: consignment.amount_paid, balanceDue: consignment.balance_due, payments: consignment.payments });
 });
 
+app.patch('/api/consignments/:id/discount', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const current = await presentConsignment(req.params.id);
+    if (!current) return res.status(404).json({ error: 'Customer delivery not found.' });
+    const discount = number(req.body.discount ?? 0, 'Discount', { min: 0 });
+    const maximumDiscount = Number(Math.max(0, current.gross_total - current.amount_paid).toFixed(2));
+    if (discount > maximumDiscount) throw new Error(`Discount cannot exceed €${maximumDiscount.toFixed(2)} while recorded payments remain active.`);
+    await Consignment.findByIdAndUpdate(current.id, { discount, updatedAt: new Date() }, { runValidators: true });
+    const updated = await presentConsignment(current.id);
+    await Invoice.updateMany({ consignment: current.id, status: { $ne: 'VOID' } }, { $set: { status: updated.payment_status === 'PAID' ? 'PAID' : 'ISSUED', 'snapshot.discount': updated.discount, 'snapshot.grossTotal': updated.gross_total, 'snapshot.finalTotal': updated.final_total, 'snapshot.amountPaid': updated.amount_paid, 'snapshot.balanceDue': updated.balance_due, 'snapshot.paymentStatus': updated.payment_status } });
+    res.json(updated);
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 app.post('/api/consignments/:id/payments', requireAuth, requireAdmin, async (req, res) => {
   try {
     const consignment = await presentConsignment(req.params.id);
@@ -608,7 +648,7 @@ app.post('/api/consignments/:id/payments', requireAuth, requireAdmin, async (req
     if (Number.isNaN(paymentDate.getTime())) throw new Error('Enter a valid payment date.');
     await Payment.create({ sqliteId: await nextMongoSourceId(Payment), consignment: consignment.id, amount, method, paymentDate, reference: text(req.body.reference, 'Payment reference'), notes: text(req.body.notes, 'Payment notes'), recordedBy: req.user.id, createdAt: new Date() });
     const updated = await presentConsignment(consignment.id);
-    if (updated.payment_status === 'PAID') await Invoice.updateMany({ consignment: consignment.id, status: 'ISSUED' }, { status: 'PAID' });
+    await Invoice.updateMany({ consignment: consignment.id, status: { $ne: 'VOID' } }, { $set: { status: updated.payment_status === 'PAID' ? 'PAID' : 'ISSUED', 'snapshot.amountPaid': updated.amount_paid, 'snapshot.balanceDue': updated.balance_due, 'snapshot.paymentStatus': updated.payment_status } });
     res.status(201).json(updated);
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
@@ -628,7 +668,7 @@ app.patch('/api/payments/:id/void', requireAuth, requireAdmin, async (req, res) 
     payment.voidedAt = new Date();
     await payment.save();
     const updated = await presentConsignment(payment.consignment);
-    if (updated.payment_status !== 'PAID') await Invoice.updateMany({ consignment: payment.consignment, status: 'PAID' }, { status: 'ISSUED' });
+    await Invoice.updateMany({ consignment: payment.consignment, status: { $ne: 'VOID' } }, { $set: { status: updated.payment_status === 'PAID' ? 'PAID' : 'ISSUED', 'snapshot.amountPaid': updated.amount_paid, 'snapshot.balanceDue': updated.balance_due, 'snapshot.paymentStatus': updated.payment_status } });
     res.json(updated);
   } catch (error) { res.status(error.message === 'Payment record not found.' ? 404 : 400).json({ error: error.message }); }
 });
@@ -638,8 +678,10 @@ app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
   if (!consignment.items.length) return res.status(400).json({ error: 'Add at least one delivery item before issuing an invoice.' });
   const year = new Date().getFullYear();
-  const nextNumber = await Invoice.countDocuments({ invoiceNumber: new RegExp(`^INV-${year}-`) }) + 1;
-  const invoiceNumber = `INV-${year}-${String(nextNumber).padStart(5, '0')}`;
+  const prefix = String(req.user.invoice_prefix || 'INV').replace(/[^A-Za-z0-9_-]/g, '').toUpperCase() || 'INV';
+  const numberPrefix = `${prefix}-${year}-`;
+  const nextNumber = await Invoice.countDocuments({ invoiceNumber: new RegExp(`^${numberPrefix}`) }) + 1;
+  const invoiceNumber = `${numberPrefix}${String(nextNumber).padStart(5, '0')}`;
   const publicToken = crypto.randomUUID();
   const publicUrl = `${req.protocol}://${req.get('host')}/delivery/${publicToken}`;
   const snapshot = invoiceSnapshot(consignment, req.user);
@@ -652,21 +694,24 @@ app.get('/delivery/:token', async (req, res) => {
   const invoice = await Invoice.findOne({ publicToken: req.params.token, status: { $ne: 'VOID' } }).lean();
   if (!invoice) return res.status(404).type('html').send('<h1>Delivery details not found</h1>');
   const snapshot = invoice.snapshot;
+  const deliveryAddress = snapshot.customer.sriLankanAddress || snapshot.customer.address || snapshot.customer.germanAddress || '—';
+  const deliveryPhone = snapshot.customer.phoneSriLanka || snapshot.customer.phone || snapshot.customer.phoneGermany || '';
   const rows = snapshot.items.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.description || 'Cargo item')}</td><td>${item.height_cm} × ${item.width_cm} × ${item.depth_cm} cm</td><td>${item.quantity}</td></tr>`).join('');
-  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Delivery details</title><style>body{margin:0;background:#f5f6f8;color:#20283a;font:16px system-ui,sans-serif}.page{max-width:760px;margin:0 auto;padding:1rem}.card{background:#fff;border:1px solid #e2e5ea;border-radius:14px;padding:1.25rem;margin:1rem 0}.heading{border-bottom:5px solid #f0d405}.heading h1{margin:0;font-size:1.5rem}.download{display:inline-block;margin-top:.8rem;padding:.65rem .9rem;border-radius:8px;background:#e3bd15;color:#19202e;text-decoration:none;font-weight:700}h2{font-size:1rem;margin:0 0 .6rem}p{line-height:1.5;margin:.3rem 0}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #e2e5ea}th{background:#f4f5f7}@media(max-width:520px){.page{padding:.5rem}.card{padding:1rem}table{font-size:.8rem}th,td{padding:.5rem}}</style></head><body><main class="page"><section class="card heading"><h1>Delivery details</h1><p>Total items: <strong>${snapshot.totalItems}</strong></p><a class="download" href="/delivery/${encodeURIComponent(req.params.token)}/download">Download delivery sheet (PDF)</a></section><section class="card"><h2>Customer</h2><p><strong>${escapeHtml(snapshot.customer.name)}</strong></p><p>Reference: ${escapeHtml(snapshot.customer.reference)}</p><p>${escapeHtml(snapshot.customer.address || '—').replace(/\n/g, '<br>')}</p></section><section class="card"><h2>Items for delivery</h2><table><thead><tr><th>#</th><th>Description</th><th>Dimensions</th><th>Quantity</th></tr></thead><tbody>${rows}</tbody></table></section></main></body></html>`);
+  res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(invoice.invoiceNumber)}</title><style>body{margin:0;background:#f5f6f8;color:#20283a;font:16px system-ui,sans-serif}.page{max-width:760px;margin:0 auto;padding:1rem}.card{background:#fff;border:1px solid #e2e5ea;border-radius:14px;padding:1.25rem;margin:1rem 0}.heading{border-bottom:5px solid #0d2b45}.heading h1{margin:0;font-size:1.5rem}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;margin-top:1rem}.summary div{padding:.8rem;border-radius:8px;background:#f2f5f7}.summary small,.summary strong{display:block}.summary strong{margin-top:.25rem}.download{display:inline-block;margin-top:.8rem;padding:.65rem .9rem;border-radius:8px;background:#0d2b45;color:#fff;text-decoration:none;font-weight:700}h2{font-size:1rem;margin:0 0 .6rem}p{line-height:1.5;margin:.3rem 0}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:.65rem;border-bottom:1px solid #e2e5ea}th{background:#f4f5f7}@media(max-width:520px){.page{padding:.5rem}.card{padding:1rem}.summary{grid-template-columns:1fr}table{font-size:.8rem}th,td{padding:.5rem}}</style></head><body><main class="page"><section class="card heading"><h1>Invoice ${escapeHtml(invoice.invoiceNumber)}</h1><p>${escapeHtml(snapshot.business.name || 'Cargo Management')}</p><div class="summary"><div><small>Total</small><strong>€${Number(snapshot.finalTotal || 0).toFixed(2)}</strong></div><div><small>Amount paid</small><strong>€${Number(snapshot.amountPaid || 0).toFixed(2)}</strong></div><div><small>Balance due</small><strong>€${Number(snapshot.balanceDue ?? snapshot.finalTotal ?? 0).toFixed(2)}</strong></div></div><a class="download" href="/delivery/${encodeURIComponent(req.params.token)}/download">Download delivery sheet (PDF)</a></section><section class="card"><h2>Ship to</h2><p><strong>${escapeHtml(snapshot.customer.name)}</strong></p><p>Reference: ${escapeHtml(snapshot.customer.reference)}</p><p>${escapeHtml(deliveryAddress).replace(/\n/g, '<br>')}</p>${deliveryPhone ? `<p>${escapeHtml(deliveryPhone)}</p>` : ''}</section><section class="card"><h2>Items</h2><table><thead><tr><th>#</th><th>Description</th><th>Dimensions</th><th>Quantity</th></tr></thead><tbody>${rows}</tbody></table></section></main></body></html>`);
 });
 
 app.get('/delivery/:token/download', async (req, res) => {
   const invoice = await Invoice.findOne({ publicToken: req.params.token, status: { $ne: 'VOID' } }).lean();
   if (!invoice) return res.status(404).send('Delivery details not found.');
   const snapshot = invoice.snapshot;
+  const deliveryAddress = snapshot.customer.sriLankanAddress || snapshot.customer.address || snapshot.customer.germanAddress || '—';
   const document = new PDFDocument({ size: 'A4', margin: 48 });
   res.attachment('delivery-sheet.pdf');
   document.pipe(res);
   document.fontSize(22).fillColor('#20283a').text('DELIVERY SHEET');
   document.moveTo(48, 82).lineTo(547, 82).strokeColor('#e3bd15').lineWidth(4).stroke();
   document.moveDown(1.5).fillColor('#20283a').fontSize(13).text('Customer');
-  document.fontSize(11).text(snapshot.customer.name).text(`Reference: ${snapshot.customer.reference}`).text(snapshot.customer.address || '—');
+  document.fontSize(11).text(snapshot.customer.name).text(`Reference: ${snapshot.customer.reference}`).text(deliveryAddress);
   document.moveDown().fontSize(12).text(`Total items: ${snapshot.totalItems}`);
   document.moveDown().fontSize(13).text('Items for delivery');
   document.moveDown(.5).fontSize(10);
