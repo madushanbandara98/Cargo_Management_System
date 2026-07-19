@@ -60,7 +60,8 @@ async function migrate(sqlite) {
   const customers = sqlite.prepare('SELECT * FROM customers ORDER BY id').all();
   await upsertMany(Customer, customers.map(row => ({
     sqliteId: row.id, customerRef: row.customer_ref, name: row.customer_name,
-    identityNumber: row.customer_id || '', germanAddress: row.german_address || '',
+    identityNumber: row.customer_id || '', pickupContactName: row.customer_name,
+    germanAddress: row.german_address || '', deliveryContactName: row.customer_name,
     sriLankanAddress: row.sri_lankan_address || '', phoneDE: row.phone_de || '', phoneLK: row.phone_lk || '',
     createdAt: sqliteDate(row.created_at, `customers.${row.id}.created_at`),
     updatedAt: sqliteDate(row.updated_at, `customers.${row.id}.updated_at`)

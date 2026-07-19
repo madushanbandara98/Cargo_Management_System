@@ -135,7 +135,10 @@ async function presentConsignment(id) {
     created_at: summary.createdAt, updated_at: summary.updatedAt,
     shipment_name: summary.container.name, shipment_reference: summary.container.reference,
     customer_ref: summary.customer.customerRef, customer_name: summary.customer.name,
-    customer_identity: summary.customer.identityNumber, german_address: summary.customer.germanAddress,
+    customer_identity: summary.customer.identityNumber,
+    pickup_contact_name: summary.customer.pickupContactName || summary.customer.name,
+    german_address: summary.customer.germanAddress,
+    delivery_contact_name: summary.customer.deliveryContactName || summary.customer.name,
     sri_lankan_address: summary.customer.sriLankanAddress, phone_de: summary.customer.phoneDE,
     phone_lk: summary.customer.phoneLK, total_cubic: Number(totalCubic.toFixed(3)), total_items: totalItems,
     items, total_amount: Number(totalAmount.toFixed(2)), gross_total: grossTotal, final_total: finalTotal,
@@ -173,7 +176,9 @@ function invoiceSnapshot(consignment, user) {
       reference: consignment.customer_ref,
       name: consignment.customer_name,
       identity: consignment.customer_identity,
+      pickupContactName: consignment.pickup_contact_name || consignment.customer_name,
       germanAddress: consignment.german_address,
+      deliveryContactName: consignment.delivery_contact_name || consignment.customer_name,
       sriLankanAddress: consignment.sri_lankan_address,
       phoneGermany: consignment.phone_de,
       phoneSriLanka: consignment.phone_lk
@@ -379,7 +384,7 @@ app.get('/api/shipments', requireAuth, async (req, res) => {
 app.get('/api/customers/by-reference/:reference', requireAuth, requireAdmin, async (req, res) => {
   const customer = await Customer.findOne({ customerRef: String(req.params.reference).trim() }).lean();
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
-  res.json({ customer_ref: customer.customerRef, customer_name: customer.name, customer_id: customer.identityNumber, german_address: customer.germanAddress, sri_lankan_address: customer.sriLankanAddress, phone_de: customer.phoneDE, phone_lk: customer.phoneLK });
+  res.json({ customer_ref: customer.customerRef, customer_name: customer.name, customer_id: customer.identityNumber, pickup_contact_name: customer.pickupContactName || customer.name, german_address: customer.germanAddress, delivery_contact_name: customer.deliveryContactName || customer.name, sri_lankan_address: customer.sriLankanAddress, phone_de: customer.phoneDE, phone_lk: customer.phoneLK });
 });
 
 app.post('/api/shipments', requireAuth, requireAdmin, async (req, res) => {
@@ -486,7 +491,7 @@ app.post('/api/shipments/:shipmentId/consignments', requireAuth, requireAdmin, a
     const customerRef = text(req.body.customerRef, 'Customer reference', { required: true });
     const customerName = text(req.body.customerName, 'Customer name', { required: true });
     let customer = await Customer.findOne({ customerRef });
-    const details = { name: customerName, identityNumber: text(req.body.customerId, 'Customer ID'), germanAddress: text(req.body.germanAddress, 'German address'), sriLankanAddress: text(req.body.sriLankanAddress, 'Sri Lankan address'), phoneDE: text(req.body.phoneDE, 'German phone'), phoneLK: text(req.body.phoneLK, 'Sri Lankan phone'), updatedAt: new Date() };
+    const details = { name: customerName, identityNumber: text(req.body.customerId, 'Customer ID'), pickupContactName: text(req.body.pickupContactName, 'Pickup contact name'), germanAddress: text(req.body.germanAddress, 'Pickup address'), deliveryContactName: text(req.body.deliveryContactName, 'Delivery contact name'), sriLankanAddress: text(req.body.sriLankanAddress, 'Delivery address'), phoneDE: text(req.body.phoneDE, 'Pickup contact number'), phoneLK: text(req.body.phoneLK, 'Delivery contact number'), updatedAt: new Date() };
     if (customer) {
       Object.assign(customer, details);
       await customer.save();
