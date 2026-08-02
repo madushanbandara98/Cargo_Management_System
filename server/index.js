@@ -10,6 +10,8 @@ import { connectMongo } from './mongo/connection.js';
 import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, Payment, ShipmentTracking, nextMongoSourceId } from './mongo/models.js';
 
 const app = express();
+const serverStartedAt = new Date();
+const recentServerErrors = [];
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
@@ -61,7 +63,12 @@ async function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Administrator access required.' });
+  if (!['OWNER', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Administrator access required.' });
+  next();
+}
+
+function requireOwner(req, res, next) {
+  if (req.user.role !== 'OWNER') return res.status(403).json({ error: 'System Owner access required.' });
   next();
 }
 
@@ -69,6 +76,12 @@ function text(value, name, { required = false } = {}) {
   const result = String(value ?? '').trim();
   if (required && !result) throw new Error(`${name} is required.`);
   return result;
+}
+
+function email(value, name, { required = false } = {}) {
+  const result = text(value, name, { required });
+  if (result && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result)) throw new Error(`${name} must be a valid email address.`);
+  return result.toLowerCase();
 }
 
 function number(value, name, { min = 0, integer = false } = {}) {
@@ -123,7 +136,10 @@ async function presentConsignment(id) {
   const grossTotal = Number((totalAmount + summary.deliveryCharge).toFixed(2));
   const discount = Number(Math.min(summary.discount || 0, grossTotal).toFixed(2));
   const finalTotal = Number((grossTotal - discount).toFixed(2));
-  const payments = await Payment.find({ consignment: summary._id }).populate('recordedBy voidedBy', 'username fullName').sort({ paymentDate: -1, createdAt: -1 }).lean();
+  const [payments, latestInvoice] = await Promise.all([
+    Payment.find({ consignment: summary._id }).populate('recordedBy voidedBy', 'username fullName').sort({ paymentDate: -1, createdAt: -1 }).lean(),
+    Invoice.findOne({ consignment: summary._id, status: { $ne: 'VOID' } }).sort({ issuedDate: -1 }).lean()
+  ]);
   const amountPaid = Number(payments.filter(payment => payment.status !== 'VOID').reduce((sum, payment) => sum + payment.amount, 0).toFixed(2));
   const balanceDue = Number(Math.max(0, finalTotal - amountPaid).toFixed(2));
   const paymentStatus = amountPaid <= 0 ? 'UNPAID' : balanceDue > 0 ? 'PARTIALLY_PAID' : 'PAID';
@@ -137,6 +153,7 @@ async function presentConsignment(id) {
     shipment_name: summary.container.name, shipment_reference: summary.container.reference,
     customer_ref: summary.customer.customerRef, customer_name: summary.customer.name,
     customer_identity: summary.customer.identityNumber,
+    billing_email: summary.customer.billingEmail,
     pickup_contact_name: summary.customer.pickupContactName || summary.customer.name,
     german_address: summary.customer.germanAddress,
     delivery_contact_name: summary.customer.deliveryContactName || summary.customer.name,
@@ -144,6 +161,7 @@ async function presentConsignment(id) {
     phone_lk: summary.customer.phoneLK, total_cubic: Number(totalCubic.toFixed(3)), total_items: totalItems,
     items, total_amount: Number(totalAmount.toFixed(2)), gross_total: grossTotal, final_total: finalTotal,
     payment_status: paymentStatus, amount_paid: amountPaid, balance_due: balanceDue,
+    latest_invoice: latestInvoice ? { id: latestInvoice._id.toString(), invoice_number: latestInvoice.invoiceNumber, status: latestInvoice.status, email_history: latestInvoice.emailHistory || [] } : null,
     payments: payments.map(payment => ({ id: payment._id.toString(), amount: payment.amount, method: payment.method, payment_date: payment.paymentDate, reference: payment.reference, notes: payment.notes, status: payment.status || 'ACTIVE', recorded_by: payment.recordedBy ? (payment.recordedBy.fullName || payment.recordedBy.username) : '', voided_by: payment.voidedBy ? (payment.voidedBy.fullName || payment.voidedBy.username) : '', voided_at: payment.voidedAt, void_reason: payment.voidReason, created_at: payment.createdAt }))
   };
 }
@@ -177,6 +195,7 @@ function invoiceSnapshot(consignment, user) {
       reference: consignment.customer_ref,
       name: consignment.customer_name,
       identity: consignment.customer_identity,
+      billingEmail: consignment.billing_email,
       pickupContactName: consignment.pickup_contact_name || consignment.customer_name,
       germanAddress: consignment.german_address,
       deliveryContactName: consignment.delivery_contact_name || consignment.customer_name,
@@ -204,9 +223,77 @@ function invoiceSnapshot(consignment, user) {
   };
 }
 
+function createInvoicePdf(invoice) {
+  return new Promise((resolve, reject) => {
+    const snapshot = invoice.snapshot;
+    const document = new PDFDocument({ size: 'A4', margin: 42, bufferPages: true });
+    const chunks = [];
+    document.on('data', chunk => chunks.push(chunk));
+    document.on('end', () => resolve(Buffer.concat(chunks)));
+    document.on('error', reject);
+    const accent = /^#[0-9a-f]{6}$/i.test(snapshot.business.accentColor || '') ? snapshot.business.accentColor : '#0D2B45';
+    const currency = snapshot.currency || 'EUR';
+    const money = value => new Intl.NumberFormat('en-IE', { style: 'currency', currency }).format(Number(value || 0));
+    const date = value => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value));
+    if (snapshot.business.logo?.startsWith('data:image/')) {
+      try {
+        const logoBuffer = Buffer.from(snapshot.business.logo.split(',')[1], 'base64');
+        document.image(logoBuffer, 42, 40, { fit: [58, 58] });
+      } catch {}
+    }
+    document.fillColor(accent).font('Helvetica-Bold').fontSize(19).text(snapshot.business.name, 112, 44, { width: 260 });
+    document.fillColor('#657184').font('Helvetica').fontSize(8.5).text([snapshot.business.phoneGermany, snapshot.business.email, snapshot.business.website].filter(Boolean).join('  •  '), 112, 70, { width: 275 });
+    document.fillColor(accent).font('Helvetica-Bold').fontSize(27).text('INVOICE', 390, 42, { width: 160, align: 'right' });
+    document.fillColor('#657184').font('Helvetica').fontSize(8.5).text(`Invoice No.  ${invoice.invoiceNumber}\nIssue Date  ${date(snapshot.issuedDate)}\nDue Date  ${date(snapshot.dueDate)}`, 390, 75, { width: 160, align: 'right', lineGap: 3 });
+    document.moveTo(42, 125).lineTo(553, 125).lineWidth(1).strokeColor('#d9e0e6').stroke();
+    document.roundedRect(42, 140, 511, 50, 6).fillColor('#f5f7f9').fill();
+    document.fillColor('#738095').font('Helvetica-Bold').fontSize(7.5).text('CUSTOMER REFERENCE', 56, 151);
+    document.fillColor(accent).fontSize(20).text(snapshot.customer.reference || '—', 56, 165);
+    const partyTop = 210;
+    document.roundedRect(42, partyTop, 248, 100, 6).lineWidth(1).strokeColor('#dce2e8').stroke();
+    document.roundedRect(305, partyTop, 248, 100, 6).stroke();
+    document.fillColor(accent).font('Helvetica-Bold').fontSize(8).text('BILL TO', 55, partyTop + 13);
+    document.fillColor('#182536').fontSize(12).text(snapshot.customer.pickupContactName || snapshot.customer.name, 55, partyTop + 30, { width: 220 });
+    document.fillColor('#526074').font('Helvetica').fontSize(8.5).text(`Customer ID: ${snapshot.customer.identity || '—'}\n${snapshot.customer.germanAddress || '—'}\n${snapshot.customer.phoneGermany || ''}`, 55, partyTop + 49, { width: 220, lineGap: 2 });
+    document.fillColor(accent).font('Helvetica-Bold').fontSize(8).text('SHIP TO', 318, partyTop + 13);
+    document.fillColor('#182536').fontSize(12).text(snapshot.customer.deliveryContactName || snapshot.customer.name, 318, partyTop + 30, { width: 220 });
+    document.fillColor('#526074').font('Helvetica').fontSize(8.5).text(`${snapshot.customer.sriLankanAddress || '—'}\n${snapshot.customer.phoneSriLanka || ''}`, 318, partyTop + 49, { width: 220, lineGap: 2 });
+    let y = 330;
+    const columns = [42, 67, 250, 340, 385, 455];
+    document.rect(42, y, 511, 24).fillColor(accent).fill();
+    document.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5);
+    ['#', 'DESCRIPTION', 'DIMENSIONS', 'QTY', 'VOLUME', 'AMOUNT'].forEach((label, index) => document.text(label, columns[index] + 5, y + 8, { width: index === 1 ? 175 : index === 2 ? 84 : index === 5 ? 93 : 40, align: index > 2 ? 'right' : 'left' }));
+    y += 24;
+    document.font('Helvetica').fontSize(8).fillColor('#263246');
+    snapshot.items.forEach((item, index) => {
+      if (y > 690) { document.addPage(); y = 48; }
+      const rowHeight = 28;
+      if (index % 2) document.rect(42, y, 511, rowHeight).fillColor('#f7f9fa').fill();
+      document.fillColor('#263246').text(String(index + 1), columns[0] + 5, y + 9, { width: 20 });
+      document.text(item.description || 'Cargo item', columns[1] + 5, y + 9, { width: 175 });
+      document.text(`${item.height_cm} × ${item.width_cm} × ${item.depth_cm}`, columns[2] + 5, y + 9, { width: 84 });
+      document.text(String(item.quantity), columns[3] + 5, y + 9, { width: 40, align: 'right' });
+      document.text((Number(item.cubic_per_item) * Number(item.quantity)).toFixed(3), columns[4] + 5, y + 9, { width: 62, align: 'right' });
+      document.text(money(item.amount), columns[5] + 5, y + 9, { width: 88, align: 'right' });
+      y += rowHeight;
+    });
+    y += 18;
+    const summaryX = 355;
+    [['Subtotal', snapshot.itemsTotal], ['Delivery charge', snapshot.deliveryCharge], ['Discount', -Number(snapshot.discount || 0)], ['Total', snapshot.finalTotal], ['Amount paid', snapshot.amountPaid], ['BALANCE DUE', snapshot.balanceDue]].forEach(([label, value], index, rows) => {
+      const last = index === rows.length - 1;
+      document.rect(summaryX, y, 198, last ? 30 : 24).fillColor(last ? accent : '#f7f9fa').fill();
+      document.fillColor(last ? '#ffffff' : '#526074').font(last ? 'Helvetica-Bold' : 'Helvetica').fontSize(last ? 11 : 8.5).text(label, summaryX + 10, y + (last ? 9 : 8), { width: 90 });
+      document.text(money(value), summaryX + 105, y + (last ? 9 : 8), { width: 83, align: 'right' });
+      y += last ? 30 : 24;
+    });
+    document.fillColor('#657184').font('Helvetica').fontSize(8).text(`Thank you for choosing ${snapshot.business.name}. Please quote invoice ${invoice.invoiceNumber} with your payment.`, 42, Math.max(y + 18, 720), { width: 511, align: 'center' });
+    document.end();
+  });
+}
+
 app.get('/api/public/business', async (req, res, next) => {
   try {
-    const administrator = await User.findOne({ role: 'ADMIN', businessName: { $nin: ['', null] } })
+    const administrator = await User.findOne({ role: { $in: ['OWNER', 'ADMIN'] }, businessName: { $nin: ['', null] } })
       .select('businessName')
       .sort({ createdAt: 1 })
       .lean();
@@ -340,6 +427,44 @@ app.delete('/api/employees/:id', requireAuth, requireAdmin, async (req, res) => 
   res.status(204).end();
 });
 
+app.get('/api/administrators', requireAuth, requireOwner, async (req, res) => {
+  const administrators = await User.find({ role: 'ADMIN' }).sort({ createdAt: -1 }).lean();
+  res.json(administrators.map(administrator => ({ id: administrator._id.toString(), username: administrator.username, full_name: administrator.fullName, created_at: administrator.createdAt, enabled: administrator.enabled !== false })));
+});
+
+app.post('/api/administrators', requireAuth, requireOwner, async (req, res) => {
+  try {
+    const username = text(req.body.username, 'Username', { required: true });
+    const fullName = text(req.body.fullName, 'Administrator name', { required: true });
+    const password = String(req.body.password ?? '');
+    if (password.length < 12) throw new Error('Temporary password must have at least 12 characters.');
+    const administrator = await User.create({ sqliteId: await nextMongoSourceId(User), username, passwordHash: bcrypt.hashSync(password, 12), role: 'ADMIN', enabled: true, fullName, createdAt: new Date() });
+    res.status(201).json({ id: administrator._id.toString(), username: administrator.username, full_name: administrator.fullName, created_at: administrator.createdAt, enabled: true });
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That username is already in use.' : error.message });
+  }
+});
+
+app.put('/api/administrators/:id', requireAuth, requireOwner, async (req, res) => {
+  try {
+    const administrator = await User.findOne({ _id: req.params.id, role: 'ADMIN' }).select('+passwordHash');
+    if (!administrator) return res.status(404).json({ error: 'Administrator not found.' });
+    administrator.fullName = text(req.body.fullName, 'Administrator name', { required: true });
+    administrator.username = text(req.body.username, 'Username', { required: true });
+    administrator.enabled = String(req.body.enabled) === 'true';
+    const password = String(req.body.password ?? '');
+    if (password) {
+      if (password.length < 12) throw new Error('New password must have at least 12 characters.');
+      administrator.passwordHash = bcrypt.hashSync(password, 12);
+      administrator.sessionVersion = Number(administrator.sessionVersion || 0) + 1;
+    }
+    await administrator.save();
+    res.json({ id: administrator._id.toString(), username: administrator.username, full_name: administrator.fullName, created_at: administrator.createdAt, enabled: administrator.enabled });
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That username is already in use.' : error.message });
+  }
+});
+
 app.get('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) => {
   const records = await ShipmentTracking.find().sort({ updatedAt: -1 }).lean();
   res.json(records.map(presentTracking));
@@ -397,7 +522,7 @@ app.delete('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, 
 });
 
 app.get('/api/shipments', requireAuth, async (req, res) => {
-  const filter = req.user.role === 'ADMIN' ? {} : { status: 'ACTIVE' };
+  const filter = ['OWNER', 'ADMIN'].includes(req.user.role) ? {} : { status: 'ACTIVE' };
   const shipments = await Container.find(filter).sort({ createdAt: -1 }).lean();
   const counts = await Consignment.aggregate([{ $group: { _id: '$container', count: { $sum: 1 } } }]);
   const countMap = new Map(counts.map(row => [row._id.toString(), row.count]));
@@ -407,7 +532,27 @@ app.get('/api/shipments', requireAuth, async (req, res) => {
 app.get('/api/customers/by-reference/:reference', requireAuth, requireAdmin, async (req, res) => {
   const customer = await Customer.findOne({ customerRef: String(req.params.reference).trim() }).lean();
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
-  res.json({ customer_ref: customer.customerRef, customer_name: customer.name, customer_id: customer.identityNumber, pickup_contact_name: customer.pickupContactName || customer.name, german_address: customer.germanAddress, delivery_contact_name: customer.deliveryContactName || customer.name, sri_lankan_address: customer.sriLankanAddress, phone_de: customer.phoneDE, phone_lk: customer.phoneLK });
+  res.json({ customer_ref: customer.customerRef, customer_name: customer.name, customer_id: customer.identityNumber, billing_email: customer.billingEmail, pickup_contact_name: customer.pickupContactName || customer.name, german_address: customer.germanAddress, delivery_contact_name: customer.deliveryContactName || customer.name, sri_lankan_address: customer.sriLankanAddress, phone_de: customer.phoneDE, phone_lk: customer.phoneLK });
+});
+
+app.get('/api/customers', requireAuth, requireAdmin, async (req, res) => {
+  const query = String(req.query.search || '').trim();
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const filter = query ? { $or: [
+    { customerRef: { $regex: escaped, $options: 'i' } },
+    { name: { $regex: escaped, $options: 'i' } },
+    { identityNumber: { $regex: escaped, $options: 'i' } },
+    { billingEmail: { $regex: escaped, $options: 'i' } },
+    { phoneDE: { $regex: escaped, $options: 'i' } },
+    { phoneLK: { $regex: escaped, $options: 'i' } }
+  ] } : {};
+  const customers = await Customer.find(filter).sort({ name: 1, customerRef: 1 }).lean();
+  res.json(customers.map(customer => ({
+    id: customer._id.toString(), customer_ref: customer.customerRef, customer_name: customer.name,
+    customer_id: customer.identityNumber, billing_email: customer.billingEmail, pickup_contact_name: customer.pickupContactName || customer.name,
+    german_address: customer.germanAddress, delivery_contact_name: customer.deliveryContactName || customer.name,
+    sri_lankan_address: customer.sriLankanAddress, phone_de: customer.phoneDE, phone_lk: customer.phoneLK
+  })));
 });
 
 app.post('/api/shipments', requireAuth, requireAdmin, async (req, res) => {
@@ -469,7 +614,7 @@ app.delete('/api/shipments/:id', requireAuth, requireAdmin, async (req, res) => 
 
 app.get('/api/shipments/:shipmentId/consignments', requireAuth, async (req, res) => {
   const shipment = await Container.findById(req.params.shipmentId).lean();
-  if (!shipment || (req.user.role !== 'ADMIN' && shipment.status !== 'ACTIVE')) {
+  if (!shipment || (!['OWNER', 'ADMIN'].includes(req.user.role) && shipment.status !== 'ACTIVE')) {
     return res.status(404).json({ error: 'Shipment not found.' });
   }
   const rows = await Consignment.find({ container: req.params.shipmentId }).populate('customer deliveredBy').sort({ deliveryStatus: -1, updatedAt: -1 }).lean();
@@ -484,10 +629,10 @@ app.get('/api/shipments/:shipmentId/consignments', requireAuth, async (req, res)
 app.patch('/api/consignments/:id/delivery-status', requireAuth, async (req, res) => {
   const requestedStatus = text(req.body.status, 'Delivery status', { required: true }).toUpperCase();
   if (!['PENDING', 'DELIVERED'].includes(requestedStatus)) return res.status(400).json({ error: 'Delivery status must be PENDING or DELIVERED.' });
-  if (requestedStatus === 'PENDING' && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Only an administrator can reopen a delivered customer.' });
+  if (requestedStatus === 'PENDING' && !['OWNER', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Only an administrator can reopen a delivered customer.' });
   const consignment = await Consignment.findById(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
-  if (req.user.role !== 'ADMIN' && !await Container.exists({ _id: consignment.container, status: 'ACTIVE' })) {
+  if (!['OWNER', 'ADMIN'].includes(req.user.role) && !await Container.exists({ _id: consignment.container, status: 'ACTIVE' })) {
     return res.status(404).json({ error: 'Customer delivery not found.' });
   }
   if (requestedStatus === 'DELIVERED' && consignment.deliveryStatus === 'DELIVERED') {
@@ -514,7 +659,7 @@ app.post('/api/shipments/:shipmentId/consignments', requireAuth, requireAdmin, a
     const customerRef = text(req.body.customerRef, 'Customer reference', { required: true });
     const customerName = text(req.body.customerName, 'Customer name', { required: true });
     let customer = await Customer.findOne({ customerRef });
-    const details = { name: customerName, identityNumber: text(req.body.customerId, 'Customer ID'), pickupContactName: text(req.body.pickupContactName, 'Pickup contact name'), germanAddress: text(req.body.germanAddress, 'Pickup address'), deliveryContactName: text(req.body.deliveryContactName, 'Delivery contact name'), sriLankanAddress: text(req.body.sriLankanAddress, 'Delivery address'), phoneDE: text(req.body.phoneDE, 'Pickup contact number'), phoneLK: text(req.body.phoneLK, 'Delivery contact number'), updatedAt: new Date() };
+    const details = { name: customerName, identityNumber: text(req.body.customerId, 'Customer ID'), billingEmail: email(req.body.billingEmail, 'Billing email'), pickupContactName: text(req.body.pickupContactName, 'Pickup contact name'), germanAddress: text(req.body.germanAddress, 'Pickup address'), deliveryContactName: text(req.body.deliveryContactName, 'Delivery contact name'), sriLankanAddress: text(req.body.sriLankanAddress, 'Delivery address'), phoneDE: text(req.body.phoneDE, 'Pickup contact number'), phoneLK: text(req.body.phoneLK, 'Delivery contact number'), updatedAt: new Date() };
     if (customer) {
       Object.assign(customer, details);
       await customer.save();
@@ -540,7 +685,7 @@ app.get('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) => 
 app.get('/api/consignments/:id/delivery-sheet', requireAuth, async (req, res) => {
   const consignment = await presentConsignment(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
-  if (req.user.role !== 'ADMIN' && !await Container.exists({ _id: consignment.shipment_id, status: 'ACTIVE' })) {
+  if (!['OWNER', 'ADMIN'].includes(req.user.role) && !await Container.exists({ _id: consignment.shipment_id, status: 'ACTIVE' })) {
     return res.status(404).json({ error: 'Customer delivery not found.' });
   }
   res.json({ id: consignment.id, deliveryStatus: consignment.delivery_status, deliveredAt: consignment.delivered_at, deliveredBy: consignment.delivered_by, customer: { name: consignment.customer_name, reference: consignment.customer_ref, address: consignment.sri_lankan_address || consignment.german_address }, totalItems: consignment.total_items, items: consignment.items.map(item => ({ description: item.description, height: item.height_cm, width: item.width_cm, depth: item.depth_cm, quantity: item.quantity })) });
@@ -718,6 +863,41 @@ app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req
   res.status(201).json({ id: invoice._id.toString(), invoiceNumber, snapshot, publicUrl, qrDataUrl });
 });
 
+app.post('/api/invoices/:id/send', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne({ _id: req.params.id, status: { $ne: 'VOID' } });
+    if (!invoice) return res.status(404).json({ error: 'Issued invoice not found.' });
+    const consignment = await Consignment.findById(invoice.consignment).populate('customer').lean();
+    if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
+    const recipient = email(req.body.recipient || consignment.customer.billingEmail, 'Billing email', { required: true });
+    const customMessage = text(req.body.message, 'Email message') || `Please find your invoice ${invoice.invoiceNumber} attached.`;
+    if (customMessage.length > 1000) throw new Error('Email message cannot exceed 1000 characters.');
+    const apiKey = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.RESEND_FROM_EMAIL?.trim();
+    if (!apiKey || !from) return res.status(503).json({ error: 'Invoice email is not configured. Add RESEND_API_KEY and RESEND_FROM_EMAIL on the server.' });
+    const pdf = await createInvoicePdf(invoice);
+    const snapshot = invoice.snapshot;
+    const subject = `Invoice ${invoice.invoiceNumber} — ${snapshot.business.name}`;
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from, to: [recipient], subject,
+        html: `<div style="font-family:Arial,sans-serif;max-width:620px;color:#182536"><h2 style="color:#0D2B45">${escapeHtml(snapshot.business.name)}</h2><p>Hello ${escapeHtml(snapshot.customer.name)},</p><p>${escapeHtml(customMessage).replace(/\n/g, '<br>')}</p><p><strong>Invoice:</strong> ${escapeHtml(invoice.invoiceNumber)}<br><strong>Total:</strong> ${escapeHtml(new Intl.NumberFormat('en-IE', { style: 'currency', currency: snapshot.currency || 'EUR' }).format(snapshot.finalTotal))}<br><strong>Due date:</strong> ${escapeHtml(new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(snapshot.dueDate)))}</p><p>Kind regards,<br>${escapeHtml(snapshot.business.name)}</p></div>`,
+        attachments: [{ filename: `Invoice-${invoice.invoiceNumber}.pdf`, content: pdf.toString('base64') }]
+      })
+    });
+    const provider = await emailResponse.json().catch(() => ({}));
+    if (!emailResponse.ok) throw new Error(provider.message || 'Resend could not send the invoice email.');
+    const sent = { recipient, message: customMessage, status: 'SENT', providerId: provider.id, sentAt: new Date(), sentBy: req.user.id };
+    invoice.emailHistory.push(sent);
+    await invoice.save();
+    res.json({ invoice_id: invoice._id.toString(), invoice_number: invoice.invoiceNumber, ...sent });
+  } catch (error) {
+    res.status(error.message === 'Issued invoice not found.' || error.message === 'Customer delivery not found.' ? 404 : 400).json({ error: error.message });
+  }
+});
+
 app.get('/delivery/:token', async (req, res) => {
   const invoice = await Invoice.findOne({ publicToken: req.params.token, status: { $ne: 'VOID' } }).lean();
   if (!invoice) return res.status(404).type('html').send('<h1>Delivery details not found</h1>');
@@ -807,7 +987,37 @@ app.delete('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
   res.json(await presentConsignment(item.consignment));
 });
 
+app.get('/api/system-health', requireAuth, requireOwner, async (req, res, next) => {
+  const checkedAt = new Date();
+  const started = Date.now();
+  try {
+    const connection = await connectMongo();
+    const [stats, users, administrators, employees, shipments, customers, consignments, items, invoices, payments] = await Promise.all([
+      connection.db.command({ dbStats: 1, scale: 1 }),
+      User.estimatedDocumentCount(), User.countDocuments({ role: 'ADMIN' }), User.countDocuments({ role: 'USER' }),
+      Container.estimatedDocumentCount(), Customer.estimatedDocumentCount(), Consignment.estimatedDocumentCount(),
+      BoxItem.estimatedDocumentCount(), Invoice.estimatedDocumentCount(), Payment.estimatedDocumentCount()
+    ]);
+    const configuredLimit = Number(process.env.MONGODB_STORAGE_LIMIT_BYTES || 0) || null;
+    const usedBytes = Number(stats.storageSize || 0) + Number(stats.indexSize || 0);
+    res.json({
+      checked_at: checkedAt, response_time_ms: Date.now() - started,
+      application: { status: 'OPERATIONAL', started_at: serverStartedAt, uptime_seconds: Math.floor(process.uptime()) },
+      database: {
+        status: connection.readyState === 1 ? 'CONNECTED' : 'DISCONNECTED', collections: stats.collections,
+        documents: stats.objects, data_size_bytes: stats.dataSize, storage_size_bytes: stats.storageSize,
+        index_size_bytes: stats.indexSize, total_used_bytes: usedBytes, storage_limit_bytes: configuredLimit,
+        usage_percent: configuredLimit ? Number(((usedBytes / configuredLimit) * 100).toFixed(2)) : null
+      },
+      records: { users, administrators, employees, shipments, customers, consignments, items, invoices, payments },
+      recent_errors: recentServerErrors.slice(-10).reverse()
+    });
+  } catch (error) { next(error); }
+});
+
 app.use((error, req, res, next) => {
+  recentServerErrors.push({ occurred_at: new Date(), method: req.method, path: req.path, type: error.name || 'Error' });
+  if (recentServerErrors.length > 50) recentServerErrors.shift();
   console.error('Request failed', { method: req.method, path: req.path, message: error.message });
   if (res.headersSent) return next(error);
   const status = error.type === 'entity.parse.failed' ? 400 : 500;

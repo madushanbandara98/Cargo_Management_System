@@ -44,13 +44,16 @@
   display: grid;
   place-items: center;
   border-radius: 10px;
+  overflow: hidden;
   color: #211e00;
   background: var(--dash-accent);
-  font-size: .8rem;
-  transform: rotate(45deg);
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .03em;
 }
 
-.dashboard-brand-mark::first-letter { transform: rotate(-45deg); }
+.dashboard-brand-mark.has-logo { background: #fff; }
+.dashboard-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
 .dashboard-brand strong,
 .dashboard-brand small { display: block; }
 .dashboard-brand strong { max-width: 165px; overflow: hidden; color: #fff; font-size: .94rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -73,7 +76,8 @@
   box-shadow: none !important;
 }
 
-.profile-label { color: #8f99aa !important; font-size: .66rem !important; }
+.profile-label { margin: .2rem 0 0 !important; color: #8f99aa !important; font-size: .66rem !important; }
+.profile-label::after { content: "  • Online"; color: #43c983; }
 .profile strong { display: block; max-width: 145px; overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-nav { gap: .35rem !important; }
 

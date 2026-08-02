@@ -55,7 +55,7 @@ async function resetAdministratorPassword() {
   if (newPassword !== confirmation) throw new Error('Passwords do not match.');
 
   await connectMongo();
-  const administrator = await User.findOne({ username: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), role: 'ADMIN' }).select('+passwordHash');
+  const administrator = await User.findOne({ username: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), role: { $in: ['OWNER', 'ADMIN'] } }).select('+passwordHash');
   if (!administrator) throw new Error(`Administrator account "${username}" was not found.`);
   administrator.passwordHash = bcrypt.hashSync(newPassword, 12);
   administrator.sessionVersion = Number(administrator.sessionVersion || 0) + 1;

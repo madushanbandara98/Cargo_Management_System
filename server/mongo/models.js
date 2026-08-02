@@ -8,7 +8,7 @@ const userSchema = new Schema({
   username: { type: String, required: true, unique: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
   sessionVersion: { type: Number, required: true, default: 0 },
-  role: { type: String, required: true, enum: ['ADMIN', 'USER'] },
+  role: { type: String, required: true, enum: ['OWNER', 'ADMIN', 'USER'] },
   enabled: { type: Boolean, required: true, default: true },
   fullName: { type: String, default: '' },
   businessName: { type: String, default: '' },
@@ -47,6 +47,7 @@ const customerSchema = new Schema({
   customerRef: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   identityNumber: { type: String, default: '' },
+  billingEmail: { type: String, default: '' },
   pickupContactName: { type: String, default: '' },
   germanAddress: { type: String, default: '' },
   deliveryContactName: { type: String, default: '' },
@@ -92,6 +93,7 @@ const invoiceSchema = new Schema({
   publicToken: { type: String, required: true, unique: true },
   status: { type: String, required: true, enum: ['ISSUED', 'PAID', 'VOID'] },
   snapshot: { type: Schema.Types.Mixed, required: true },
+  emailHistory: { type: [Schema.Types.Mixed], default: [] },
   issuedDate: { type: Date, required: true }
 }, { versionKey: false });
 
