@@ -223,17 +223,28 @@ function invoiceSnapshot(consignment, user) {
   };
 }
 
-function createInvoicePdf(invoice) {
+export async function createInvoicePdf(invoice, baseUrl = '') {
+  const snapshot = invoice.snapshot;
+  const publicUrl = snapshot.publicUrl || `${baseUrl || 'http://localhost:3000'}/delivery/${invoice.publicToken}`;
+  const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 360, margin: 1, errorCorrectionLevel: 'M' });
+  const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
   return new Promise((resolve, reject) => {
-    const snapshot = invoice.snapshot;
     const document = new PDFDocument({ size: 'A4', margin: 42, bufferPages: true });
     const chunks = [];
     document.on('data', chunk => chunks.push(chunk));
     document.on('end', () => resolve(Buffer.concat(chunks)));
     document.on('error', reject);
+    document.rect(0, 0, document.page.width, document.page.height).fill('#FFFFFF');
     const accent = /^#[0-9a-f]{6}$/i.test(snapshot.business.accentColor || '') ? snapshot.business.accentColor : '#0D2B45';
+    const accentChannels = [1, 3, 5].map(index => parseInt(accent.slice(index, index + 2), 16) / 255);
+    const accentLuminance = accentChannels.map(channel => channel <= .03928 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+    const accentForeground = accentLuminance > .42 ? '#182536' : '#FFFFFF';
+    const accentText = accentLuminance > .55 ? '#182536' : accent;
     const currency = snapshot.currency || 'EUR';
-    const money = value => new Intl.NumberFormat('en-IE', { style: 'currency', currency }).format(Number(value || 0));
+    const money = value => {
+      const amount = new Intl.NumberFormat('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0));
+      return currency === 'EUR' ? `€ ${amount}` : `${currency} ${amount}`;
+    };
     const date = value => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value));
     if (snapshot.business.logo?.startsWith('data:image/')) {
       try {
@@ -241,52 +252,115 @@ function createInvoicePdf(invoice) {
         document.image(logoBuffer, 42, 40, { fit: [58, 58] });
       } catch {}
     }
-    document.fillColor(accent).font('Helvetica-Bold').fontSize(19).text(snapshot.business.name, 112, 44, { width: 260 });
-    document.fillColor('#657184').font('Helvetica').fontSize(8.5).text([snapshot.business.phoneGermany, snapshot.business.email, snapshot.business.website].filter(Boolean).join('  •  '), 112, 70, { width: 275 });
-    document.fillColor(accent).font('Helvetica-Bold').fontSize(27).text('INVOICE', 390, 42, { width: 160, align: 'right' });
-    document.fillColor('#657184').font('Helvetica').fontSize(8.5).text(`Invoice No.  ${invoice.invoiceNumber}\nIssue Date  ${date(snapshot.issuedDate)}\nDue Date  ${date(snapshot.dueDate)}`, 390, 75, { width: 160, align: 'right', lineGap: 3 });
-    document.moveTo(42, 125).lineTo(553, 125).lineWidth(1).strokeColor('#d9e0e6').stroke();
-    document.roundedRect(42, 140, 511, 50, 6).fillColor('#f5f7f9').fill();
-    document.fillColor('#738095').font('Helvetica-Bold').fontSize(7.5).text('CUSTOMER REFERENCE', 56, 151);
-    document.fillColor(accent).fontSize(20).text(snapshot.customer.reference || '—', 56, 165);
+    document.fillColor(accentText).font('Helvetica-Bold').fontSize(19).text(snapshot.business.name, 112, 42, { width: 260 });
+    document.fillColor('#536174').font('Helvetica').fontSize(7.5).text(snapshot.business.tagline || '', 112, 66, { width: 275 });
+    document.fillColor('#657184').fontSize(7.2).text([snapshot.business.phoneGermany, snapshot.business.phoneSriLanka, snapshot.business.email, snapshot.business.website].filter(Boolean).join('  •  '), 112, 79, { width: 275 });
+    document.fillColor(accentText).font('Helvetica-Bold').fontSize(27).text('INVOICE', 390, 42, { width: 160, align: 'right' });
+    document.fillColor('#657184').font('Helvetica').fontSize(7.5).text(`Invoice No.  ${invoice.invoiceNumber}\nIssue Date  ${date(snapshot.issuedDate)}\nDue Date  ${date(snapshot.dueDate)}`, 390, 73, { width: 160, align: 'right', lineGap: 2 });
+    const statusText = snapshot.paymentStatus === 'PARTIALLY_PAID' ? 'PARTIALLY PAID' : snapshot.paymentStatus || 'UNPAID';
+    document.roundedRect(500, 110, 53, 16, 5).lineWidth(.8).strokeColor('#d5aa57').stroke();
+    document.fillColor('#9b5900').font('Helvetica-Bold').fontSize(6.5).text(statusText, 503, 115, { width: 47, align: 'center' });
+    document.moveTo(42, 135).lineTo(553, 135).lineWidth(1).strokeColor('#d9e0e6').stroke();
+    document.roundedRect(42, 145, 511, 50, 6).fillColor('#f5f7f9').fill();
+    document.roundedRect(42, 145, 5, 50, 3).fillColor(accent).fill();
+    document.fillColor('#738095').font('Helvetica-Bold').fontSize(7.5).text('CUSTOMER REFERENCE', 56, 156);
+    document.fillColor(accentText).fontSize(20).text(snapshot.customer.reference || '—', 56, 170);
     const partyTop = 210;
     document.roundedRect(42, partyTop, 248, 100, 6).lineWidth(1).strokeColor('#dce2e8').stroke();
     document.roundedRect(305, partyTop, 248, 100, 6).stroke();
-    document.fillColor(accent).font('Helvetica-Bold').fontSize(8).text('BILL TO', 55, partyTop + 13);
+    document.fillColor('#087d86').font('Helvetica-Bold').fontSize(8).text('BILL TO', 55, partyTop + 13);
     document.fillColor('#182536').fontSize(12).text(snapshot.customer.pickupContactName || snapshot.customer.name, 55, partyTop + 30, { width: 220 });
     document.fillColor('#526074').font('Helvetica').fontSize(8.5).text(`Customer ID: ${snapshot.customer.identity || '—'}\n${snapshot.customer.germanAddress || '—'}\n${snapshot.customer.phoneGermany || ''}`, 55, partyTop + 49, { width: 220, lineGap: 2 });
-    document.fillColor(accent).font('Helvetica-Bold').fontSize(8).text('SHIP TO', 318, partyTop + 13);
+    document.fillColor('#087d86').font('Helvetica-Bold').fontSize(8).text('SHIP TO', 318, partyTop + 13);
     document.fillColor('#182536').fontSize(12).text(snapshot.customer.deliveryContactName || snapshot.customer.name, 318, partyTop + 30, { width: 220 });
     document.fillColor('#526074').font('Helvetica').fontSize(8.5).text(`${snapshot.customer.sriLankanAddress || '—'}\n${snapshot.customer.phoneSriLanka || ''}`, 318, partyTop + 49, { width: 220, lineGap: 2 });
-    let y = 330;
-    const columns = [42, 67, 250, 340, 385, 455];
+    const stripTop = 322;
+    const stripWidths = [160, 140, 97, 114];
+    const stripLabels = [['ROUTE', 'Germany  >  Sri Lanka'], ['SHIPMENT', snapshot.shipment.name], ['CURRENCY', currency], ['PREPARED BY', snapshot.business.contactName]];
+    let stripX = 42;
+    stripLabels.forEach(([label, value], index) => {
+      document.rect(stripX, stripTop, stripWidths[index], 35).fillColor('#f7f9fa').fill().strokeColor('#dce2e8').lineWidth(.7).stroke();
+      document.fillColor('#778395').font('Helvetica').fontSize(6).text(label, stripX + 8, stripTop + 7, { width: stripWidths[index] - 16 });
+      document.fillColor('#182536').font('Helvetica-Bold').fontSize(7.5).text(value || '—', stripX + 8, stripTop + 19, { width: stripWidths[index] - 16 });
+      stripX += stripWidths[index];
+    });
+    let y = 368;
+    const columns = [42, 64, 220, 310, 350, 405, 470];
     document.rect(42, y, 511, 24).fillColor(accent).fill();
-    document.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5);
-    ['#', 'DESCRIPTION', 'DIMENSIONS', 'QTY', 'VOLUME', 'AMOUNT'].forEach((label, index) => document.text(label, columns[index] + 5, y + 8, { width: index === 1 ? 175 : index === 2 ? 84 : index === 5 ? 93 : 40, align: index > 2 ? 'right' : 'left' }));
+    document.fillColor(accentForeground).font('Helvetica-Bold').fontSize(6.5);
+    const headerWidths = [18, 150, 85, 36, 51, 60, 78];
+    ['#', 'DESCRIPTION', 'DIMENSIONS (CM)', 'QTY', 'VOLUME (M³)', 'RATE', 'AMOUNT'].forEach((label, index) => document.text(label, columns[index] + 4, y + 8, { width: headerWidths[index], align: index > 2 ? 'right' : 'left' }));
     y += 24;
     document.font('Helvetica').fontSize(8).fillColor('#263246');
     snapshot.items.forEach((item, index) => {
       if (y > 690) { document.addPage(); y = 48; }
       const rowHeight = 28;
       if (index % 2) document.rect(42, y, 511, rowHeight).fillColor('#f7f9fa').fill();
-      document.fillColor('#263246').text(String(index + 1), columns[0] + 5, y + 9, { width: 20 });
-      document.text(item.description || 'Cargo item', columns[1] + 5, y + 9, { width: 175 });
-      document.text(`${item.height_cm} × ${item.width_cm} × ${item.depth_cm}`, columns[2] + 5, y + 9, { width: 84 });
-      document.text(String(item.quantity), columns[3] + 5, y + 9, { width: 40, align: 'right' });
-      document.text((Number(item.cubic_per_item) * Number(item.quantity)).toFixed(3), columns[4] + 5, y + 9, { width: 62, align: 'right' });
-      document.text(money(item.amount), columns[5] + 5, y + 9, { width: 88, align: 'right' });
+      document.fillColor('#263246').text(String(index + 1), columns[0] + 4, y + 9, { width: 18 });
+      document.text(item.description || 'Cargo item', columns[1] + 4, y + 9, { width: 150 });
+      document.text(`${item.height_cm} × ${item.width_cm} × ${item.depth_cm}`, columns[2] + 4, y + 9, { width: 85 });
+      document.text(String(item.quantity), columns[3] + 4, y + 9, { width: 36, align: 'right' });
+      document.text((Number(item.cubic_per_item) * Number(item.quantity)).toFixed(3), columns[4] + 4, y + 9, { width: 51, align: 'right' });
+      document.text(money(snapshot.ratePerCubic), columns[5] + 4, y + 9, { width: 60, align: 'right' });
+      document.text(money(item.amount), columns[6] + 4, y + 9, { width: 78, align: 'right' });
       y += rowHeight;
     });
     y += 18;
+    if (y > 560) { document.addPage(); y = 60; }
+    const detailsY = y;
+    document.fillColor('#087d86').font('Helvetica-Bold').fontSize(7.5).text('NOTES', 42, detailsY, { width: 280 });
+    document.fillColor('#526074').font('Helvetica').fontSize(7.5).text(`Thank you for choosing ${snapshot.business.name}. Please quote invoice ${invoice.invoiceNumber} with your payment.\nPayment terms: ${snapshot.paymentTerms}.`, 42, detailsY + 14, { width: 280, lineGap: 3 });
+    document.fillColor('#087d86').font('Helvetica-Bold').fontSize(7.5).text('PAYMENT DETAILS', 42, detailsY + 58, { width: 280 });
+    const paymentLines = [
+      snapshot.business.bankName && `Bank: ${snapshot.business.bankName}`,
+      snapshot.business.accountHolder && `Account holder: ${snapshot.business.accountHolder}`,
+      snapshot.business.iban && `IBAN: ${snapshot.business.iban}`,
+      snapshot.business.bic && `BIC / SWIFT: ${snapshot.business.bic}`
+    ].filter(Boolean);
+    document.fillColor('#526074').font('Helvetica').fontSize(7.5).text(paymentLines.join('\n') || 'Payment details are available from the business.', 42, detailsY + 72, { width: 280, lineGap: 3 });
     const summaryX = 355;
-    [['Subtotal', snapshot.itemsTotal], ['Delivery charge', snapshot.deliveryCharge], ['Discount', -Number(snapshot.discount || 0)], ['Total', snapshot.finalTotal], ['Amount paid', snapshot.amountPaid], ['BALANCE DUE', snapshot.balanceDue]].forEach(([label, value], index, rows) => {
+    [['Subtotal', snapshot.itemsTotal], ['Delivery charge', snapshot.deliveryCharge], ['Discount', -Number(snapshot.discount || 0)], ['Tax', 0], ['Total', snapshot.finalTotal], ['Amount paid', snapshot.amountPaid], ['BALANCE DUE', snapshot.balanceDue]].forEach(([label, value], index, rows) => {
       const last = index === rows.length - 1;
-      document.rect(summaryX, y, 198, last ? 30 : 24).fillColor(last ? accent : '#f7f9fa').fill();
-      document.fillColor(last ? '#ffffff' : '#526074').font(last ? 'Helvetica-Bold' : 'Helvetica').fontSize(last ? 11 : 8.5).text(label, summaryX + 10, y + (last ? 9 : 8), { width: 90 });
-      document.text(money(value), summaryX + 105, y + (last ? 9 : 8), { width: 83, align: 'right' });
-      y += last ? 30 : 24;
+      const rowHeight = last ? 28 : 20;
+      document.rect(summaryX, y, 198, rowHeight).fillColor(last ? accent : '#FFFFFF').fill();
+      if (!last) document.moveTo(summaryX, y + rowHeight).lineTo(summaryX + 198, y + rowHeight).lineWidth(.7).strokeColor('#dce2e8').stroke();
+      document.fillColor(last ? accentForeground : '#526074').font(last ? 'Helvetica-Bold' : 'Helvetica').fontSize(last ? 11 : 8.2).text(label, summaryX + 10, y + (last ? 8 : 6.5), { width: 90 });
+      document.text(money(value), summaryX + 105, y + (last ? 8 : 6.5), { width: 83, align: 'right' });
+      y += rowHeight;
     });
-    document.fillColor('#657184').font('Helvetica').fontSize(8).text(`Thank you for choosing ${snapshot.business.name}. Please quote invoice ${invoice.invoiceNumber} with your payment.`, 42, Math.max(y + 18, 720), { width: 511, align: 'center' });
+    document.roundedRect(summaryX, detailsY, 198, y - detailsY, 6).lineWidth(.8).strokeColor('#d8dfe6').stroke();
+    document.image(qrBuffer, 455, y + 12, { width: 52, height: 52 });
+    document.fillColor('#536174').font('Helvetica').fontSize(6).text('Scan to view invoice', 511, y + 32, { width: 42 });
+    document.moveTo(42, 690).lineTo(553, 690).lineWidth(.7).strokeColor('#dce2e8').stroke();
+    const footerContacts = [snapshot.business.name, snapshot.business.phoneGermany, snapshot.business.phoneSriLanka, snapshot.business.email].filter(Boolean).join('  •  ');
+    document.fillColor('#697688').font('Helvetica').fontSize(5.8).text(footerContacts, 42, 698, { width: 430 });
+    document.text('Page 1 of 1', 500, 698, { width: 53, align: 'right' });
+
+    const itemLabels = snapshot.items.flatMap((item, itemIndex) => Array.from({ length: Number(item.quantity || 0) }, (_, quantityIndex) => ({
+      itemNumber: itemIndex + 1,
+      quantityNumber: quantityIndex + 1,
+      quantity: Number(item.quantity || 0),
+      description: item.description || 'Cargo item'
+    })));
+    for (let firstLabel = 0; firstLabel < itemLabels.length; firstLabel += 9) {
+      const labels = itemLabels.slice(firstLabel, firstLabel + 9);
+      document.addPage({ size: 'A4', margin: 28 });
+      document.rect(0, 0, document.page.width, document.page.height).fill('#FFFFFF');
+      labels.forEach((label, labelIndex) => {
+        const column = labelIndex % 3;
+        const row = Math.floor(labelIndex / 3);
+        const labelX = 28 + column * 180;
+        const labelY = 28 + row * 252;
+        const overallNumber = firstLabel + labelIndex + 1;
+        document.roundedRect(labelX, labelY, 166, 238, 8).lineWidth(.9).strokeColor('#d6dbe3').stroke();
+        document.fillColor('#111827').font('Helvetica-Bold').fontSize(9).text(String(snapshot.business.name || '').toUpperCase(), labelX + 10, labelY + 17, { width: 146, align: 'center' });
+        document.fillColor('#687086').font('Helvetica').fontSize(7).text(label.description, labelX + 10, labelY + 32, { width: 146, align: 'center' });
+        document.image(qrBuffer, labelX + 34, labelY + 51, { width: 98, height: 98 });
+        document.fillColor('#111827').font('Helvetica-Bold').fontSize(21).text(snapshot.customer.reference || '—', labelX + 10, labelY + 161, { width: 146, align: 'center' });
+        document.fontSize(10).text(`ITEM ${String(overallNumber).padStart(2, '0')}/${String(itemLabels.length).padStart(2, '0')}`, labelX + 10, labelY + 194, { width: 146, align: 'center' });
+        document.fillColor('#687086').font('Helvetica').fontSize(7).text(`Box ${label.itemNumber} - ${label.quantityNumber} of ${label.quantity}`, labelX + 10, labelY + 212, { width: 146, align: 'center' });
+      });
+    }
     document.end();
   });
 }
@@ -858,9 +932,28 @@ app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req
   const publicToken = crypto.randomUUID();
   const publicUrl = `${req.protocol}://${req.get('host')}/delivery/${publicToken}`;
   const snapshot = invoiceSnapshot(consignment, req.user);
+  snapshot.publicUrl = publicUrl;
   const invoice = await Invoice.create({ sqliteId: await nextMongoSourceId(Invoice), invoiceNumber, consignment: consignment.id, issuedBy: req.user.id, publicToken, status: consignment.payment_status === 'PAID' ? 'PAID' : 'ISSUED', snapshot, issuedDate: new Date() });
   const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 220, margin: 1, errorCorrectionLevel: 'M' });
   res.status(201).json({ id: invoice._id.toString(), invoiceNumber, snapshot, publicUrl, qrDataUrl });
+});
+
+app.get('/api/invoices/:id/pdf', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne({ _id: req.params.id, status: { $ne: 'VOID' } });
+    if (!invoice) return res.status(404).send('Issued invoice not found.');
+    const pdf = await createInvoicePdf(invoice, `${req.protocol}://${req.get('host')}`);
+    const filename = `Invoice-${invoice.invoiceNumber}.pdf`;
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': String(pdf.length),
+      'Cache-Control': 'private, no-store'
+    });
+    res.send(pdf);
+  } catch (error) {
+    res.status(error.message === 'Issued invoice not found.' ? 404 : 500).send(error.message);
+  }
 });
 
 app.post('/api/invoices/:id/send', requireAuth, requireAdmin, async (req, res) => {
@@ -875,12 +968,12 @@ app.post('/api/invoices/:id/send', requireAuth, requireAdmin, async (req, res) =
     const apiKey = process.env.RESEND_API_KEY?.trim();
     const from = process.env.RESEND_FROM_EMAIL?.trim();
     if (!apiKey || !from) return res.status(503).json({ error: 'Invoice email is not configured. Add RESEND_API_KEY and RESEND_FROM_EMAIL on the server.' });
-    const pdf = await createInvoicePdf(invoice);
+    const pdf = await createInvoicePdf(invoice, `${req.protocol}://${req.get('host')}`);
     const snapshot = invoice.snapshot;
     const subject = `Invoice ${invoice.invoiceNumber} — ${snapshot.business.name}`;
     const emailResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'Asanka-Cargo-Invoice-Service/1.0' },
       body: JSON.stringify({
         from, to: [recipient], subject,
         html: `<div style="font-family:Arial,sans-serif;max-width:620px;color:#182536"><h2 style="color:#0D2B45">${escapeHtml(snapshot.business.name)}</h2><p>Hello ${escapeHtml(snapshot.customer.name)},</p><p>${escapeHtml(customMessage).replace(/\n/g, '<br>')}</p><p><strong>Invoice:</strong> ${escapeHtml(invoice.invoiceNumber)}<br><strong>Total:</strong> ${escapeHtml(new Intl.NumberFormat('en-IE', { style: 'currency', currency: snapshot.currency || 'EUR' }).format(snapshot.finalTotal))}<br><strong>Due date:</strong> ${escapeHtml(new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(snapshot.dueDate)))}</p><p>Kind regards,<br>${escapeHtml(snapshot.business.name)}</p></div>`,

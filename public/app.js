@@ -1070,14 +1070,14 @@ function renderDocumentActions(consignment = null) {
   invoiceActions.className = 'invoice-actions';
   const emailHistory = consignment?.latest_invoice?.email_history || [];
   const lastEmail = emailHistory[emailHistory.length - 1];
-  const canSend = Boolean(consignment?.latest_invoice && consignment?.billing_email);
-  invoiceActions.innerHTML = `<button type="button" id="preview-invoice" class="secondary" ${consignment ? '' : 'disabled'}>Preview invoice</button><button type="button" id="download-packing-list" class="secondary" ${consignment ? '' : 'disabled'}>Download packing list</button><button type="button" id="issue-invoice" ${consignment ? '' : 'disabled'}>Print invoice</button><button type="button" id="send-invoice" ${canSend ? '' : 'disabled'} title="${!consignment?.latest_invoice ? 'Issue the invoice before sending it.' : !consignment?.billing_email ? 'Add and save a billing email before sending.' : ''}">${lastEmail ? 'Resend Invoice' : 'Send Invoice'}</button>${lastEmail ? `<span class="invoice-email-status">✓ Sent to ${escapeHtml(lastEmail.recipient)}</span>` : ''}`;
-  if (!document.querySelector('#invoice-email-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="invoice-email-styles">.invoice-email-status{align-self:center;color:#087443;font-size:.8rem;font-weight:700}.invoice-email-dialog{width:min(560px,calc(100% - 2rem))}.invoice-email-summary{padding:.85rem;border:1px solid #e3e7ed;border-radius:9px;background:#f7f8fa}.invoice-email-summary span,.invoice-email-summary strong{display:block}.invoice-email-summary span{color:#697386;font-size:.76rem}.invoice-email-summary strong{margin-top:.2rem}.invoice-email-dialog textarea{width:100%;min-height:130px;resize:vertical;border:1px solid #cbd1dc;border-radius:7px;padding:.75rem;font:inherit;line-height:1.5}</style>');
+  const canSend = Boolean(consignment?.billing_email);
+  invoiceActions.innerHTML = `<div class="document-buttons"><button type="button" id="preview-invoice" class="secondary" ${consignment ? '' : 'disabled'}>Preview invoice</button><button type="button" id="download-packing-list" class="secondary" ${consignment ? '' : 'disabled'}>Download packing list</button><button type="button" id="issue-invoice" ${consignment ? '' : 'disabled'}>Print invoice</button><button type="button" id="send-invoice" ${canSend ? '' : 'disabled'} title="${!consignment ? 'Save or load a customer first.' : !consignment.billing_email ? 'Add and save a billing email before sending.' : ''}">${lastEmail ? 'Resend Invoice' : 'Send Invoice'}</button></div>${lastEmail ? `<div class="invoice-email-status">✓ Sent to <span>${escapeHtml(lastEmail.recipient)}</span></div>` : ''}`;
+  if (!document.querySelector('#invoice-email-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="invoice-email-styles">.shipment-page .page-action-bar .invoice-actions{width:min(100%,1180px)!important;display:block!important}.document-buttons{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;width:100%}.document-buttons button{width:100%;min-width:0!important}.invoice-email-status{display:flex;align-items:center;justify-content:center;gap:.3rem;width:100%;margin-top:.8rem;padding:.65rem .8rem;border:1px solid #a9dec8;border-radius:8px;color:#087443;background:#f1fbf6;font-size:.8rem;font-weight:700;overflow-wrap:anywhere}.invoice-email-dialog{width:min(560px,calc(100% - 2rem))}.invoice-email-summary{padding:.85rem;border:1px solid #e3e7ed;border-radius:9px;background:#f7f8fa}.invoice-email-summary span,.invoice-email-summary strong{display:block}.invoice-email-summary span{color:#697386;font-size:.76rem}.invoice-email-summary strong{margin-top:.2rem}.invoice-email-dialog textarea{width:100%;min-height:130px;resize:vertical;border:1px solid #cbd1dc;border-radius:7px;padding:.75rem;font:inherit;line-height:1.5}@media(max-width:850px){.document-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.document-buttons{grid-template-columns:1fr}.invoice-email-status{align-items:flex-start;flex-direction:column}}</style>');
   pageActionBar.append(invoiceActions);
   if (!consignment) return;
   invoiceActions.querySelector('#preview-invoice').onclick = () => openInvoice(consignment, false, document.querySelector('#item-editor'));
   invoiceActions.querySelector('#download-packing-list').onclick = () => window.open(`/api/consignments/${consignment.id}/packing-list`, '_blank');
-  invoiceActions.querySelector('#issue-invoice').onclick = () => openInvoice(consignment, true, document.querySelector('#item-editor'));
+  invoiceActions.querySelector('#issue-invoice').onclick = () => printIssuedInvoice(consignment, document.querySelector('#item-editor'));
   invoiceActions.querySelector('#send-invoice').onclick = () => showSendInvoiceDialog(consignment);
 }
 
@@ -1085,8 +1085,10 @@ function showSendInvoiceDialog(consignment) {
   const invoice = consignment.latest_invoice;
   const dialog = document.createElement('dialog');
   dialog.className = 'confirm-dialog invoice-email-dialog';
-  const defaultMessage = `Please find your invoice ${invoice.invoice_number} attached.`;
-  dialog.innerHTML = `<form><h2>Send Invoice</h2><p>The issued invoice PDF will be sent to the saved billing email.</p><div class="invoice-email-summary"><span>Invoice</span><strong>${escapeHtml(invoice.invoice_number)}</strong></div><div class="invoice-email-summary"><span>Recipient</span><strong>${escapeHtml(consignment.billing_email)}</strong></div><div class="invoice-email-summary"><span>Attachment</span><strong>Invoice-${escapeHtml(invoice.invoice_number)}.pdf</strong></div><label>Short message<textarea name="message" maxlength="1000">${escapeHtml(defaultMessage)}</textarea></label><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button>Send Invoice</button></div></form>`;
+  const defaultMessage = invoice ? `Please find your invoice ${invoice.invoice_number} attached.` : 'Please find your invoice attached.';
+  const invoiceLabel = invoice?.invoice_number || 'A permanent invoice number will be created';
+  const attachmentLabel = invoice ? `Invoice-${invoice.invoice_number}.pdf` : 'The issued invoice PDF will be attached';
+  dialog.innerHTML = `<form><h2>Send Invoice</h2><p>The same official invoice PDF used for printing will be sent to the saved billing email.</p><div class="invoice-email-summary"><span>Invoice</span><strong>${escapeHtml(invoiceLabel)}</strong></div><div class="invoice-email-summary"><span>Recipient</span><strong>${escapeHtml(consignment.billing_email)}</strong></div><div class="invoice-email-summary"><span>Attachment</span><strong>${escapeHtml(attachmentLabel)}</strong></div><label>Short message<textarea name="message" maxlength="1000">${escapeHtml(defaultMessage)}</textarea></label><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button>Send Invoice</button></div></form>`;
   document.body.append(dialog);
   dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
   dialog.addEventListener('close', () => dialog.remove());
@@ -1096,11 +1098,16 @@ function showSendInvoiceDialog(consignment) {
     button.disabled = true;
     button.textContent = 'Sending…';
     try {
-      const sent = await api(`/api/invoices/${invoice.id}/send`, { method: 'POST', body: JSON.stringify({ recipient: consignment.billing_email, message: event.currentTarget.elements.message.value }) });
+      if (!consignment.latest_invoice) {
+        const issued = await api(`/api/consignments/${consignment.id}/invoices`, { method: 'POST', body: '{}' });
+        consignment.latest_invoice = { id: issued.id, invoice_number: issued.invoiceNumber, status: 'ISSUED', email_history: [] };
+      }
+      const issuedInvoice = consignment.latest_invoice;
+      const sent = await api(`/api/invoices/${issuedInvoice.id}/send`, { method: 'POST', body: JSON.stringify({ recipient: consignment.billing_email, message: event.currentTarget.elements.message.value }) });
       consignment.latest_invoice.email_history.push({ recipient: sent.recipient, message: sent.message, status: sent.status, sentAt: sent.sentAt });
       dialog.close();
       renderDocumentActions(consignment);
-      showToast(`Invoice ${invoice.invoice_number} sent to ${sent.recipient}.`);
+      showToast(`Invoice ${issuedInvoice.invoice_number} sent to ${sent.recipient}.`);
     } catch (error) {
       button.disabled = false;
       button.textContent = 'Send Invoice';
@@ -1221,6 +1228,22 @@ function enableItemEnterNavigation(form) {
   });
 }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
+async function printIssuedInvoice(consignment, messageTarget) {
+  const invoiceWindow = window.open('', '_blank');
+  if (!invoiceWindow) return message(messageTarget, 'Allow pop-ups to print an invoice.');
+  invoiceWindow.document.write('<title>Preparing invoice…</title><p style="font-family:system-ui;padding:2rem">Preparing official invoice PDF…</p>');
+  try {
+    if (!consignment.latest_invoice) {
+      const issued = await api(`/api/consignments/${consignment.id}/invoices`, { method: 'POST', body: '{}' });
+      consignment.latest_invoice = { id: issued.id, invoice_number: issued.invoiceNumber, status: 'ISSUED', email_history: [] };
+      renderDocumentActions(consignment);
+    }
+    invoiceWindow.location.replace(`/api/invoices/${consignment.latest_invoice.id}/pdf`);
+  } catch (error) {
+    invoiceWindow.close();
+    message(messageTarget, error.message);
+  }
+}
 async function openInvoice(consignment, issue, messageTarget) {
   const invoiceWindow = window.open('', '_blank');
   if (!invoiceWindow) return message(messageTarget, 'Allow pop-ups to preview or print an invoice.');
