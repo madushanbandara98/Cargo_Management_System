@@ -358,7 +358,6 @@ export async function createInvoicePdf(invoice, baseUrl = '') {
         document.image(qrBuffer, labelX + 34, labelY + 51, { width: 98, height: 98 });
         document.fillColor('#111827').font('Helvetica-Bold').fontSize(21).text(snapshot.customer.reference || '—', labelX + 10, labelY + 161, { width: 146, align: 'center' });
         document.fontSize(10).text(`ITEM ${String(overallNumber).padStart(2, '0')}/${String(itemLabels.length).padStart(2, '0')}`, labelX + 10, labelY + 194, { width: 146, align: 'center' });
-        document.fillColor('#687086').font('Helvetica').fontSize(7).text(`Box ${label.itemNumber} - ${label.quantityNumber} of ${label.quantity}`, labelX + 10, labelY + 212, { width: 146, align: 'center' });
       });
     }
     document.end();
@@ -600,7 +599,7 @@ app.get('/api/shipments', requireAuth, async (req, res) => {
   const shipments = await Container.find(filter).sort({ createdAt: -1 }).lean();
   const counts = await Consignment.aggregate([{ $group: { _id: '$container', count: { $sum: 1 } } }]);
   const countMap = new Map(counts.map(row => [row._id.toString(), row.count]));
-  res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
+  res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, container_number: row.containerNumber || '', status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
 });
 
 app.get('/api/customers/by-reference/:reference', requireAuth, requireAdmin, async (req, res) => {
@@ -637,6 +636,28 @@ app.post('/api/shipments', requireAuth, requireAdmin, async (req, res) => {
     res.status(201).json({ id: shipment._id.toString(), name, reference, status: shipment.status, created_at: shipment.createdAt, created_by: req.user.id, consignment_count: 0 });
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'Shipment reference already exists.' : error.message });
+  }
+});
+
+app.patch('/api/shipments/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const name = text(req.body.name, 'Shipment name', { required: true });
+    const reference = text(req.body.reference, 'Shipment reference', { required: true });
+    const rawContainerNumber = text(req.body.containerNumber, 'Container number');
+    const update = { $set: { name, reference } };
+    if (rawContainerNumber) update.$set.containerNumber = rawContainerNumber;
+    else update.$unset = { containerNumber: 1 };
+    const shipment = await Container.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (!shipment) return res.status(404).json({ error: 'Shipment not found.' });
+    const consignmentCount = await Consignment.countDocuments({ container: shipment._id });
+    res.json({
+      id: shipment._id.toString(), name: shipment.name, reference: shipment.reference,
+      container_number: shipment.containerNumber || '', status: shipment.status,
+      created_at: shipment.createdAt, created_by: shipment.createdBy.toString(),
+      consignment_count: consignmentCount
+    });
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'Shipment reference or container number already exists.' : error.message });
   }
 });
 
@@ -798,17 +819,31 @@ app.get('/api/consignments/:id/packing-list', requireAuth, requireAdmin, async (
   document.y = Math.max(document.y, detailsY + 92);
   document.moveTo(48, document.y).lineTo(547, document.y).strokeColor('#dfe3e8').lineWidth(1).stroke();
   document.moveDown(1.1);
+  const pickupAddress = consignment.german_address || 'Address not provided';
+  const pickupPhone = consignment.phone_de || '';
   const deliveryAddress = consignment.sri_lankan_address || 'Address not provided';
   const deliveryPhone = consignment.phone_lk || '';
-  const addressY = document.y;
-  const addressHeight = Math.max(98, document.heightOfString(deliveryAddress, { width: 450 }) + (deliveryPhone ? 85 : 70));
-  document.roundedRect(48, addressY, 499, addressHeight, 9).fill('#fffdf0').strokeColor('#d9c219').lineWidth(1.2).stroke();
-  document.roundedRect(62, addressY + 13, 118, 22, 6).fill('#f0d405');
-  document.font('Helvetica-Bold').fontSize(8).fillColor('#302b00').text('DELIVERY ADDRESS', 72, addressY + 20, { width: 98 });
-  document.font('Helvetica-Bold').fontSize(13).fillColor('#20283a').text(consignment.delivery_contact_name || consignment.customer_name, 62, addressY + 45, { width: 465 });
-  document.font('Helvetica').fontSize(9).fillColor('#687086').text(`Customer reference: ${consignment.customer_ref}`, 62, document.y + 3, { width: 465 });
-  document.font('Helvetica-Bold').fontSize(10).fillColor('#20283a').text(deliveryAddress, 62, document.y + 7, { width: 465 });
-  if (deliveryPhone) document.font('Helvetica').fontSize(9).fillColor('#4f596b').text(`Phone: ${deliveryPhone}`, 62, document.y + 6, { width: 465 });
+  const referenceY = document.y;
+  document.roundedRect(48, referenceY, 499, 24, 5).fill('#f0d405');
+  document.font('Helvetica-Bold').fontSize(9).fillColor('#302b00').text(`CUSTOMER REF  ${consignment.customer_ref}`, 62, referenceY + 7, { width: 471 });
+  const addressY = referenceY + 36;
+  const addressWidth = 237;
+  const addressTextWidth = 209;
+  const addressHeight = Math.max(
+    125,
+    document.heightOfString(pickupAddress, { width: addressTextWidth }) + (pickupPhone ? 94 : 80),
+    document.heightOfString(deliveryAddress, { width: addressTextWidth }) + (deliveryPhone ? 94 : 80)
+  );
+  const drawAddressBox = ({ x, title, name, address, phone }) => {
+    document.roundedRect(x, addressY, addressWidth, addressHeight, 9).fill('#fffdf0').strokeColor('#d9c219').lineWidth(1.2).stroke();
+    document.roundedRect(x + 14, addressY + 13, 118, 22, 6).fill('#f0d405');
+    document.font('Helvetica-Bold').fontSize(8).fillColor('#302b00').text(title, x + 24, addressY + 20, { width: 98 });
+    document.font('Helvetica-Bold').fontSize(11).fillColor('#20283a').text(name, x + 14, addressY + 45, { width: addressTextWidth });
+    document.font('Helvetica').fontSize(9.5).fillColor('#3f4958').text(address, x + 14, document.y + 9, { width: addressTextWidth, lineGap: 2 });
+    if (phone) document.font('Helvetica').fontSize(9).fillColor('#5c6675').text(`Phone: ${phone}`, x + 14, document.y + 7, { width: addressTextWidth });
+  };
+  drawAddressBox({ x: 48, title: 'PICKUP DETAILS', name: consignment.pickup_contact_name || consignment.customer_name, address: pickupAddress, phone: pickupPhone });
+  drawAddressBox({ x: 310, title: 'DELIVERY DETAILS', name: consignment.delivery_contact_name || consignment.customer_name, address: deliveryAddress, phone: deliveryPhone });
   document.y = addressY + addressHeight + 22;
   const columns = { no: 48, description: 75, dimensions: 260, quantity: 415, volume: 474 };
   const widths = { description: 175, dimensions: 145, quantity: 49, volume: 73 };

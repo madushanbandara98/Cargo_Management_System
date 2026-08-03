@@ -150,17 +150,32 @@
 
 .cards { gap: .7rem !important; }
 .shipment {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "details edit" "details actions";
+  align-items: center;
+  gap: .35rem 1rem;
   min-height: 86px;
   padding: 1rem 1.1rem !important;
   background: var(--dash-surface);
   transition: border-color .15s, transform .15s, box-shadow .15s;
 }
+.shipment > div:first-child { grid-area: details; min-width: 0; }
 
 .shipment:hover { transform: translateY(-1px); border-color: #ccd2db !important; box-shadow: 0 8px 24px rgba(25,33,48,.06) !important; }
 .shipment h3 { color: var(--dash-ink); font-size: .98rem; }
 .shipment p { color: var(--dash-muted); font-size: .82rem; }
 .shipment p::first-letter { text-transform: uppercase; }
-.shipment-actions { display: flex; align-items: center; gap: .55rem; }
+.shipment-identifiers { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .65rem !important; }
+.shipment-identifiers span { display: inline-flex; align-items: center; gap: .35rem; }
+.shipment-identifiers strong { color: var(--dash-ink); }
+.shipment-actions { grid-area: actions; display: flex; align-items: center; justify-content: flex-end; gap: .55rem; }
+.shipment-actions button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; padding: .72rem 1.1rem; font-size: .84rem; }
+.shipment-actions svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.shipment-edit { grid-area: edit; justify-self: end; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; color: #465164; border: 1px solid #d8dde5; background: #fff !important; font-size: 1rem; line-height: 1; }
+.shipment-edit:hover { color: #202838; border-color: #aeb6c2; background: #f7f8fa !important; }
+.shipment-edit-dialog small { color: var(--dash-muted); font-size: .75rem; font-weight: 500; }
+@media(max-width:700px){.shipment{grid-template-areas:"details edit" "actions actions"}.shipment .shipment-edit{width:32px}.shipment-actions{margin-top:.35rem}}
 .shipment-activation { color: #fff; border: 1px solid #11734c; background: #16875b !important; }
 .shipment-activation:hover { border-color: #0b603e; background: #10734c !important; }
 .shipment-activation.is-active { color: #11734c; background: #ecf8f2 !important; }

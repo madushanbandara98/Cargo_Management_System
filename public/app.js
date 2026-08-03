@@ -193,8 +193,15 @@ function setActiveNavigation(id) {
 async function loadShipments() {
   const shipments = await api('/api/shipments'); const list = document.querySelector('#shipment-list');
   const createdDate = value => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
-  list.innerHTML = shipments.length ? shipments.map(s => `<article class="card shipment"><div><h3>${escapeHtml(s.name)}</h3><p>Created ${createdDate(s.created_at)} · ${s.consignment_count} ${s.consignment_count === 1 ? 'customer' : 'customers'}${hasAdministratorAccess() ? ` · ${s.status === 'ACTIVE' ? 'Active' : 'Not active'}` : ''}</p></div><div class="shipment-actions"><button data-open-id="${s.id}">Open</button>${hasAdministratorAccess() ? `<button class="shipment-activation ${s.status === 'ACTIVE' ? 'is-active' : ''}" data-status-id="${s.id}" data-next-status="${s.status === 'ACTIVE' ? 'OPEN' : 'ACTIVE'}">${s.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button><button class="shipment-delete" data-delete-id="${s.id}" data-shipment-name="${escapeHtml(s.name)}">Delete</button>` : ''}</div></article>`).join('') : `<p>${hasAdministratorAccess() ? 'No shipments yet. Create your first shipment.' : 'No active shipments are available.'}</p>`;
+  const icons = {
+    open: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M18 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+    activate: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></svg>',
+    deactivate: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg>',
+    delete: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>'
+  };
+  list.innerHTML = shipments.length ? shipments.map(s => `<article class="card shipment"><div><h3>${escapeHtml(s.name)}</h3><p>Created ${createdDate(s.created_at)} · ${s.consignment_count} ${s.consignment_count === 1 ? 'customer' : 'customers'}${hasAdministratorAccess() ? ` · ${s.status === 'ACTIVE' ? 'Active' : 'Not active'}` : ''}</p><p class="shipment-identifiers"><span>Internal ref <strong>${escapeHtml(s.reference)}</strong></span><span>Container <strong>${escapeHtml(s.container_number || 'Not assigned yet')}</strong></span></p></div><div class="shipment-actions"><button data-open-id="${s.id}">${icons.open}<span>Open</span></button>${hasAdministratorAccess() ? `<button class="shipment-activation ${s.status === 'ACTIVE' ? 'is-active' : ''}" data-status-id="${s.id}" data-next-status="${s.status === 'ACTIVE' ? 'OPEN' : 'ACTIVE'}">${s.status === 'ACTIVE' ? icons.deactivate : icons.activate}<span>${s.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</span></button><button class="shipment-delete" data-delete-id="${s.id}" data-shipment-name="${escapeHtml(s.name)}">${icons.delete}<span>Delete</span></button>` : ''}</div>${hasAdministratorAccess() ? `<button type="button" class="shipment-edit" data-edit-id="${s.id}" title="Edit shipment details" aria-label="Edit ${escapeHtml(s.name)} shipment details">✎</button>` : ''}</article>`).join('') : `<p>${hasAdministratorAccess() ? 'No shipments yet. Create your first shipment.' : 'No active shipments are available.'}</p>`;
   list.querySelectorAll('[data-open-id]').forEach(button => button.onclick = () => openShipment(shipments.find(s => s.id === button.dataset.openId)));
+  list.querySelectorAll('[data-edit-id]').forEach(button => button.onclick = () => showEditShipmentDialog(shipments.find(s => s.id === button.dataset.editId)));
   list.querySelectorAll('[data-status-id]').forEach(button => button.onclick = async () => {
     const activating = button.dataset.nextStatus === 'ACTIVE';
     button.disabled = true;
@@ -210,6 +217,34 @@ async function loadShipments() {
     }
   });
   list.querySelectorAll('[data-delete-id]').forEach(button => button.onclick = () => showDeleteShipmentDialog({ id: button.dataset.deleteId, name: button.dataset.shipmentName }));
+}
+
+function showEditShipmentDialog(shipment) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog shipment-edit-dialog';
+  dialog.innerHTML = `<form><h2>Edit shipment details</h2><p>Add the container number when it becomes available.</p><label>Container number / reference<input name="containerNumber" value="${escapeHtml(shipment.container_number)}" placeholder="Enter in any format"><small>Optional until the container is assigned. Any format is accepted.</small></label><label>Shipment name<input name="name" value="${escapeHtml(shipment.name)}" required></label><label>Internal reference<input name="reference" value="${escapeHtml(shipment.reference)}" required></label><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button>Save changes</button></div></form>`;
+  document.body.append(dialog);
+  const form = dialog.querySelector('form');
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const submit = form.querySelector('button:not([type="button"])');
+    submit.disabled = true;
+    submit.textContent = 'Saving…';
+    try {
+      await api(`/api/shipments/${shipment.id}`, { method: 'PATCH', body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+      dialog.close();
+      showToast('Shipment details updated.');
+      await loadShipments();
+    } catch (error) {
+      submit.disabled = false;
+      submit.textContent = 'Save changes';
+      message(form, error.message);
+    }
+  };
+  dialog.showModal();
 }
 
 function showDeleteShipmentDialog(shipment) {
