@@ -14,6 +14,8 @@ migration and is not read by the deployed application.
 5. Start Vite in another terminal with `npm run dev`.
 6. Open the URL printed by Vite (normally `http://localhost:5173`).
 
+The default `TRACKING_PROVIDER=manual` enables a complete confirmed/planned journey timeline without external credentials. Set a strong `TRACKING_WEBHOOK_SECRET` before testing the webhook endpoint. The optional `mock` provider is for clearly labeled demonstrations only. Production tracking additionally requires an installed provider adapter and credentials from that provider; unsupported provider names fail closed instead of falling back to simulated data.
+
 Vite proxies `/api` and `/delivery` to the local Express server. Frontend code
 uses relative `/api/...` URLs, so no localhost API URL is built into production.
 
@@ -28,6 +30,8 @@ uses relative `/api/...` URLs, so no localhost API URL is built into production.
    - `MONGODB_URI`: the MongoDB Atlas connection string.
    - `JWT_SECRET`: a cryptographically random value of at least 32 characters.
    - `MONGODB_DB` (optional): an explicit Atlas database name.
+   - `TRACKING_PROVIDER`: keep `manual` until a production adapter is installed; `mock` is available only for labeled demonstrations.
+   - `TRACKING_WEBHOOK_SECRET`: a random secret used to authenticate incoming tracking updates.
 
    Add them to Production and any Preview environments that need database
    access. Never prefix these values with `VITE_`; `VITE_` variables are exposed

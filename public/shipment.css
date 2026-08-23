@@ -342,7 +342,7 @@
 .shipment-page .payment-history-link:disabled { color: #8a93a3; cursor: not-allowed; }
 
 .payment-history-dialog { width: min(820px, calc(100% - 2rem)); padding: 0; border: 0; border-radius: 15px; color: #192130; background: #fff; box-shadow: 0 24px 70px rgba(16,24,40,.25); }
-.payment-history-dialog::backdrop { background: rgba(15,23,42,.58); backdrop-filter: blur(2px); }
+.payment-history-dialog::backdrop { background: rgba(15,23,42,.58); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .payment-history-dialog > section { padding: 1.35rem; }
 .payment-history-dialog header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .payment-history-dialog h2 { margin: 0; font-size: 1.25rem; }
@@ -360,7 +360,7 @@
 .void-payment-button:hover { background: #fff1f0 !important; }
 
 .void-payment-dialog { width: min(500px, calc(100% - 2rem)); padding: 0; border: 0; border-radius: 16px; color: #192130; background: #fff; box-shadow: 0 24px 70px rgba(16,24,40,.28); }
-.void-payment-dialog::backdrop { background: rgba(15,23,42,.62); backdrop-filter: blur(2px); }
+.void-payment-dialog::backdrop { background: rgba(15,23,42,.62); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .void-payment-dialog form { padding: 1.5rem; }
 .void-dialog-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: #a62922; background: #fff0ef; font-size: 1.15rem; font-weight: 900; }
 .void-payment-dialog h2 { margin: .85rem 0 0; font-size: 1.25rem; text-transform: uppercase; }
@@ -546,11 +546,8 @@
   border: 1px solid #e1e5eb;
   border-radius: 10px;
   background: #fff;
-  -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   touch-action: pan-x pan-y;
-  scrollbar-color: #8792a2 #eef1f4;
-  scrollbar-width: auto;
 }
 .shipment-page .items-table-scroll:focus-visible { outline: 3px solid rgba(240,212,5,.45); outline-offset: 2px; }
 .shipment-page .items-table-scroll::-webkit-scrollbar { height: 12px; }
@@ -770,7 +767,7 @@
 .delivery-empty { padding: 2rem; color: var(--shipment-muted); text-align: center; }
 
 .delivery-confirm-dialog { width: min(440px, calc(100% - 2rem)); padding: 0; border: 0; border-radius: 16px; color: var(--shipment-ink); background: #fff; box-shadow: 0 24px 70px rgba(16,24,40,.25); }
-.delivery-confirm-dialog::backdrop { background: rgba(15,23,42,.58); backdrop-filter: blur(2px); }
+.delivery-confirm-dialog::backdrop { background: rgba(15,23,42,.58); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .delivery-confirm-dialog form { padding: 1.6rem; }
 .delivery-confirm-icon { width: 46px; height: 46px; display: grid; place-items: center; margin-bottom: 1rem; border-radius: 50%; color: #fff; background: #16875b; font-size: 1.15rem; font-weight: 900; }
 .delivery-confirm-dialog h2 { margin: 0; font-size: 1.3rem; }

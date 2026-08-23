@@ -6,6 +6,7 @@ let draftItems = [];
 let editingDraftItemIndex = null;
 let currentUser = null;
 let trackingRecords = [];
+let trackingStatusRefreshTimer = null;
 let deliveryStatusRefreshTimer = null;
 
 const carrierTrackingUrls = {
@@ -77,32 +78,19 @@ function updateSidebarIdentity(user) {
 }
 
 async function login() {
-  app.innerHTML = document.querySelector('#login-template').innerHTML;
-  const form = document.querySelector('#login-form');
-  form.addEventListener('submit', async event => { event.preventDefault(); try { await api('/api/auth/login', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); dashboard(); } catch (error) { message(form, error.message); } });
-  const password = form.elements.password;
-  const passwordToggle = form.querySelector('.password-toggle');
-  passwordToggle.addEventListener('click', () => {
-    const showing = password.type === 'text';
-    password.type = showing ? 'password' : 'text';
-    passwordToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
-    passwordToggle.setAttribute('aria-pressed', String(!showing));
+  window.clearInterval(trackingStatusRefreshTimer);
+  app.replaceChildren();
+  window.renderLogin({
+    authenticate: credentials => api('/api/auth/login', { method: 'POST', body: JSON.stringify(credentials) }),
+    loadBusiness: async () => (await api('/api/public/business')).businessName,
+    onAuthenticated: dashboard
   });
-  try {
-    const { businessName } = await api('/api/public/business');
-    document.querySelector('#login-business-name').textContent = businessName;
-    document.querySelector('#login-mobile-business-name').textContent = businessName;
-    document.title = `${businessName} · Sign in`;
-  } catch {
-    document.querySelector('#login-business-name').textContent = 'Cargo Management';
-    document.querySelector('#login-mobile-business-name').textContent = 'Cargo Management';
-    document.title = 'Cargo Management · Sign in';
-  }
 }
 
 async function dashboard() {
   let me;
   try { me = await api('/api/auth/me'); } catch { return login(); }
+  window.clearReactView();
   currentUser = me.user;
   app.innerHTML = document.querySelector('#dashboard-template').innerHTML;
   initializeBusinessSettingsPanel();
@@ -174,8 +162,15 @@ async function dashboard() {
     document.querySelector('#new-shipment').classList.add('hidden');
     document.querySelector('#settings').classList.add('hidden');
   }
-  document.querySelector('#cancel-shipment').onclick = showCurrentShipments;
-  document.querySelector('#create-shipment').addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; try { const shipment = await api('/api/shipments', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); form.reset(); document.querySelector('#shipment-form').classList.add('hidden'); await loadShipments(); openShipment(shipment); } catch (error) { message(form, error.message); } });
+  window.renderCreateShipmentForm(document.querySelector('#shipment-form'), {
+    createShipment: details => api('/api/shipments', { method: 'POST', body: JSON.stringify(details) }),
+    onCancel: showCurrentShipments,
+    onCreated: async shipment => {
+      document.querySelector('#shipment-form').classList.add('hidden');
+      await loadShipments();
+      openShipment(shipment);
+    }
+  });
   await loadShipments();
   setActiveNavigation('current-shipment');
 }
@@ -192,31 +187,19 @@ function setActiveNavigation(id) {
 
 async function loadShipments() {
   const shipments = await api('/api/shipments'); const list = document.querySelector('#shipment-list');
-  const createdDate = value => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
-  const icons = {
-    open: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M18 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
-    activate: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></svg>',
-    deactivate: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg>',
-    delete: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>'
-  };
-  list.innerHTML = shipments.length ? shipments.map(s => `<article class="card shipment"><div><h3>${escapeHtml(s.name)}</h3><p>Created ${createdDate(s.created_at)} · ${s.consignment_count} ${s.consignment_count === 1 ? 'customer' : 'customers'}${hasAdministratorAccess() ? ` · ${s.status === 'ACTIVE' ? 'Active' : 'Not active'}` : ''}</p><p class="shipment-identifiers"><span>Internal ref <strong>${escapeHtml(s.reference)}</strong></span><span>Container <strong>${escapeHtml(s.container_number || 'Not assigned yet')}</strong></span></p></div><div class="shipment-actions"><button data-open-id="${s.id}">${icons.open}<span>Open</span></button>${hasAdministratorAccess() ? `<button class="shipment-activation ${s.status === 'ACTIVE' ? 'is-active' : ''}" data-status-id="${s.id}" data-next-status="${s.status === 'ACTIVE' ? 'OPEN' : 'ACTIVE'}">${s.status === 'ACTIVE' ? icons.deactivate : icons.activate}<span>${s.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</span></button><button class="shipment-delete" data-delete-id="${s.id}" data-shipment-name="${escapeHtml(s.name)}">${icons.delete}<span>Delete</span></button>` : ''}</div>${hasAdministratorAccess() ? `<button type="button" class="shipment-edit" data-edit-id="${s.id}" title="Edit shipment details" aria-label="Edit ${escapeHtml(s.name)} shipment details">✎</button>` : ''}</article>`).join('') : `<p>${hasAdministratorAccess() ? 'No shipments yet. Create your first shipment.' : 'No active shipments are available.'}</p>`;
-  list.querySelectorAll('[data-open-id]').forEach(button => button.onclick = () => openShipment(shipments.find(s => s.id === button.dataset.openId)));
-  list.querySelectorAll('[data-edit-id]').forEach(button => button.onclick = () => showEditShipmentDialog(shipments.find(s => s.id === button.dataset.editId)));
-  list.querySelectorAll('[data-status-id]').forEach(button => button.onclick = async () => {
-    const activating = button.dataset.nextStatus === 'ACTIVE';
-    button.disabled = true;
-    button.textContent = activating ? 'Activating…' : 'Deactivating…';
-    try {
-      await api(`/api/shipments/${button.dataset.statusId}/status`, { method: 'PATCH', body: JSON.stringify({ status: button.dataset.nextStatus }) });
+  window.renderShipmentList(list, {
+    shipments,
+    administratorAccess: hasAdministratorAccess(),
+    onOpen: openShipment,
+    onEdit: showEditShipmentDialog,
+    onDelete: showDeleteShipmentDialog,
+    onStatusChange: async (shipment, nextStatus) => {
+      const activating = nextStatus === 'ACTIVE';
+      await api(`/api/shipments/${shipment.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) });
       showToast(`Shipment ${activating ? 'activated' : 'deactivated'}.`);
       await loadShipments();
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = activating ? 'Activate' : 'Deactivate';
-      message(list, error.message);
     }
   });
-  list.querySelectorAll('[data-delete-id]').forEach(button => button.onclick = () => showDeleteShipmentDialog({ id: button.dataset.deleteId, name: button.dataset.shipmentName }));
 }
 
 function showEditShipmentDialog(shipment) {
@@ -782,11 +765,16 @@ async function showShipmentTracking() {
       form.reset();
       toggleCustomCarrier();
       await loadTrackingRecords(record.id);
-      await openOfficialTracking(record);
+      if (record.provider === 'mock') showToast('Mock tracking subscription created. Automatic events are ready to review.');
+      else await openOfficialTracking(record);
     } catch (error) { message(form, error.message); }
     finally { submit.disabled = false; submit.textContent = 'Track shipment'; }
   };
   await loadTrackingRecords();
+  window.clearInterval(trackingStatusRefreshTimer);
+  trackingStatusRefreshTimer = window.setInterval(() => {
+    if (!panel.classList.contains('hidden') && document.visibilityState === 'visible') loadTrackingRecords(document.querySelector('#tracking-summary')?.dataset.trackingId).catch(() => {});
+  }, 60_000);
 }
 
 async function loadTrackingRecords(selectedId) {
@@ -799,8 +787,17 @@ function trackingStatusLabel(status) {
   return ({ NOT_UPDATED: 'Not updated', IN_TRANSIT: 'In transit', DELAYED: 'Delayed', ARRIVING_SOON: 'Arriving soon', DELIVERED: 'Delivered' })[status] || status;
 }
 
+function renderTrackingTimeline(record) {
+  const events = record.events || [];
+  const date = value => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+  const time = value => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' }).format(new Date(value));
+  const rows = events.map(event => `<tr class="${event.is_estimated ? 'planned' : 'confirmed'}"><td class="journey-line-cell"><span aria-hidden="true"></span></td><td><strong>${escapeHtml(event.description)}</strong><small>${event.is_estimated ? 'Planned' : 'Confirmed'}</small></td><td>${escapeHtml(event.location)}</td><td>${escapeHtml(date(event.event_time))}</td><td>${escapeHtml(time(event.event_time))}</td><td>${escapeHtml(event.vessel || event.transport_mode || '—')}</td><td>${escapeHtml(event.voyage || '—')}</td></tr>`).join('');
+  return `<details class="card tracking-journey"><summary><span><strong>Container journey</strong><small>${events.length ? `${events.filter(event => !event.is_estimated).length} confirmed · ${events.filter(event => event.is_estimated).length} planned` : 'No journey entered yet'}</small></span><span class="journey-chevron" aria-hidden="true">⌄</span></summary><div class="tracking-journey-content">${events.length ? `<div class="tracking-journey-table-wrap"><table class="tracking-journey-table"><thead><tr><th></th><th>Event</th><th>Location</th><th>Date</th><th>Time</th><th>Transport</th><th>Voyage No.</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="tracking-journey-empty"><p>No journey events have been entered. Add the confirmed and planned milestones from the official carrier website.</p></div>'}<div class="tracking-journey-footer"><p>Solid green = confirmed · Broken gray = planned</p><button data-edit-journey="${record.id}">${events.length ? 'Update journey' : 'Create journey'}</button></div></div></details>`;
+}
+
 function renderTrackingSummary(record) {
   const summary = document.querySelector('#tracking-summary');
+  summary.dataset.trackingId = record?.id || '';
   const counts = status => trackingRecords.filter(item => item.status === status).length;
   const stats = `<div class="tracking-stats"><article><span class="tracking-stat-icon in-transit">↗</span><div><small>In transit</small><strong>${counts('IN_TRANSIT')}</strong></div></article><article><span class="tracking-stat-icon delayed">!</span><div><small>Delayed</small><strong>${counts('DELAYED')}</strong></div></article><article><span class="tracking-stat-icon arriving">⌁</span><div><small>Arriving soon</small><strong>${counts('ARRIVING_SOON')}</strong></div></article><article><span class="tracking-stat-icon delivered">✓</span><div><small>Delivered</small><strong>${counts('DELIVERED')}</strong></div></article></div>`;
   if (!record) {
@@ -809,7 +806,10 @@ function renderTrackingSummary(record) {
   }
   const updated = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.updated_at));
   const eta = record.eta ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(record.eta)) : 'Not set';
-  summary.innerHTML = `${stats}<section class="card tracking-feature"><div class="tracking-feature-main"><div class="tracking-title"><h3>${escapeHtml(record.container_number)}</h3><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span></div><h4>${escapeHtml(record.origin || 'Origin not set')} <span>→</span> ${escapeHtml(record.destination || 'Destination not set')}</h4><p class="tracking-latest">⌖ ${escapeHtml(record.latest_status || 'Not updated')}</p><div class="tracking-meta"><div><small>Carrier</small><strong>${escapeHtml(record.carrier)}</strong></div><div><small>Vessel</small><strong>${escapeHtml(record.vessel || 'Not set')}</strong></div><div><small>Updated</small><strong>${escapeHtml(updated)}</strong></div><div><small>ETA</small><strong>${escapeHtml(eta)}</strong></div></div><div class="tracking-feature-actions"><button class="secondary" data-update-tracking="${record.id}">Update status</button><button data-open-carrier="${record.id}">Open carrier tracking ↗</button></div></div><div class="tracking-route"><div class="route-line"><span></span><i></i><span></span></div><div class="route-labels"><strong>${escapeHtml(record.origin || 'Origin')}</strong><strong>${escapeHtml(record.destination || 'Destination')}</strong></div><p>Manual tracking record</p><small>Use the official carrier page for the latest confirmed movement, then update this record.</small></div></section>`;
+  const provider = record.provider || 'manual';
+  const syncLabel = provider === 'manual' ? 'Manual journey tracking' : provider === 'mock' ? 'Demo journey data' : `${provider} automatic tracking`;
+  const syncNote = provider === 'manual' ? 'Check the official carrier page, then update confirmed and planned journey events below.' : provider === 'mock' ? 'Simulated events are retained only as a provider-integration demonstration.' : `Last provider sync ${record.last_synced_at ? new Date(record.last_synced_at).toLocaleString() : 'pending'}.`;
+  summary.innerHTML = `${stats}<section class="card tracking-feature"><div class="tracking-feature-main"><div class="tracking-title"><h3>${escapeHtml(record.container_number)}</h3><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span></div><h4>${escapeHtml(record.origin || 'Origin not set')} <span>→</span> ${escapeHtml(record.destination || 'Destination not set')}</h4><p class="tracking-latest">⌖ ${escapeHtml(record.latest_status || 'Not updated')}</p><div class="tracking-meta"><div><small>Carrier</small><strong>${escapeHtml(record.carrier)}</strong></div><div><small>Vessel</small><strong>${escapeHtml(record.vessel || 'Not set')}</strong></div><div><small>Updated</small><strong>${escapeHtml(updated)}</strong></div><div><small>ETA</small><strong>${escapeHtml(eta)}</strong></div></div><div class="tracking-feature-actions"><button data-edit-journey="${record.id}">${record.events?.length ? 'Update journey' : 'Create journey'}</button><button class="secondary" data-open-carrier="${record.id}">Open carrier tracking ↗</button></div></div><div class="tracking-route"><div class="route-line"><span></span><i></i><span></span></div><div class="route-labels"><strong>${escapeHtml(record.origin || 'Origin')}</strong><strong>${escapeHtml(record.destination || 'Destination')}</strong></div><p>${escapeHtml(syncLabel)}</p><small>${escapeHtml(syncNote)}</small></div></section>${renderTrackingTimeline(record)}`;
   bindTrackingActions(summary);
 }
 
@@ -817,14 +817,37 @@ function renderTrackingList() {
   const list = document.querySelector('#tracking-list');
   if (!trackingRecords.length) { list.innerHTML = '<p class="tracking-list-empty">No tracked shipments yet.</p>'; return; }
   const date = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value)) : '—';
-  list.innerHTML = `<div class="tracking-table-wrap"><table class="table tracking-table"><thead><tr><th>Container</th><th>Carrier</th><th>Route</th><th>Latest status</th><th>ETA</th><th>Action</th></tr></thead><tbody>${trackingRecords.map(record => `<tr><td><strong>${escapeHtml(record.container_number)}</strong></td><td>${escapeHtml(record.carrier)}</td><td>${escapeHtml(record.origin || '—')} → ${escapeHtml(record.destination || '—')}</td><td><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span><small>${escapeHtml(record.latest_status)}</small></td><td>${escapeHtml(date(record.eta))}</td><td><div class="tracking-row-actions"><button class="secondary" data-view-tracking="${record.id}">View status</button><button class="tracking-menu-button" data-update-tracking="${record.id}" aria-label="Update ${escapeHtml(record.container_number)}">✎</button><button class="tracking-remove-button" data-remove-tracking="${record.id}" aria-label="Remove ${escapeHtml(record.container_number)}">×</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  list.innerHTML = `<div class="tracking-table-wrap"><table class="table tracking-table"><thead><tr><th>Container</th><th>Carrier</th><th>Route</th><th>Latest status</th><th>ETA</th><th>Action</th></tr></thead><tbody>${trackingRecords.map(record => `<tr><td><strong>${escapeHtml(record.container_number)}</strong></td><td>${escapeHtml(record.carrier)}</td><td>${escapeHtml(record.origin || '—')} → ${escapeHtml(record.destination || '—')}</td><td><span class="tracking-badge status-${record.status.toLowerCase()}">${escapeHtml(trackingStatusLabel(record.status))}</span><small>${escapeHtml(record.latest_status)}</small></td><td>${escapeHtml(date(record.eta))}</td><td><div class="tracking-row-actions"><button class="secondary" data-view-tracking="${record.id}">View status</button><button class="tracking-menu-button" data-edit-journey="${record.id}" aria-label="Update ${escapeHtml(record.container_number)} journey">✎</button><button class="tracking-remove-button" data-remove-tracking="${record.id}" aria-label="Remove ${escapeHtml(record.container_number)}">×</button></div></td></tr>`).join('')}</tbody></table></div>`;
   bindTrackingActions(list);
 }
 
 function bindTrackingActions(node) {
   node.querySelectorAll('[data-view-tracking]').forEach(button => button.onclick = () => renderTrackingSummary(trackingRecords.find(record => record.id === button.dataset.viewTracking)));
+  node.querySelectorAll('[data-edit-journey]').forEach(button => button.onclick = () => showJourneyEditor(trackingRecords.find(record => record.id === button.dataset.editJourney)));
   node.querySelectorAll('[data-update-tracking]').forEach(button => button.onclick = () => showTrackingUpdateDialog(trackingRecords.find(record => record.id === button.dataset.updateTracking)));
   node.querySelectorAll('[data-open-carrier]').forEach(button => button.onclick = () => openOfficialTracking(trackingRecords.find(record => record.id === button.dataset.openCarrier)));
+  node.querySelectorAll('[data-subscribe-tracking]').forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    button.textContent = 'Creating subscription…';
+    try {
+      const updated = await api(`/api/shipment-tracking/${button.dataset.subscribeTracking}/subscribe`, { method: 'POST' });
+      await loadTrackingRecords(updated.id);
+      showToast('Demo automation enabled. Existing tracking record preserved.');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Enable demo automation';
+      showToast(error.message, 'error');
+    }
+  });
+  node.querySelectorAll('[data-simulate-tracking]').forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    button.textContent = 'Receiving update…';
+    try {
+      const updated = await api(`/api/shipment-tracking/${button.dataset.simulateTracking}/simulate`, { method: 'POST' });
+      await loadTrackingRecords(updated.id);
+      showToast('Mock provider delivered the next webhook event.');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
   node.querySelectorAll('[data-remove-tracking]').forEach(button => button.onclick = async () => {
     const record = trackingRecords.find(item => item.id === button.dataset.removeTracking);
     if (!confirm(`Stop tracking ${record.container_number}?`)) return;
@@ -839,6 +862,93 @@ async function openOfficialTracking(record) {
   try { await navigator.clipboard.writeText(record.container_number); } catch {}
   window.open(url, '_blank', 'noopener');
   showToast(`Container ${record.container_number} copied. Paste it into the carrier tracking page.`);
+}
+
+function showJourneyEditor(record) {
+  if (!record) return;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog journey-editor-dialog';
+  dialog.innerHTML = `<form><header><div><h2>${record.events?.length ? 'Update' : 'Create'} container journey</h2><p>${escapeHtml(record.container_number)} · Copy confirmed and planned milestones from ${escapeHtml(record.carrier)}.</p></div><button type="button" class="secondary journey-editor-close" data-cancel aria-label="Close">×</button></header><div class="journey-editor-note">Confirmed events use a solid green line. Planned events use a broken gray line until you confirm them.</div><div class="journey-editor-table-wrap"><table class="journey-editor-table"><thead><tr><th>Event type</th><th>Event name</th><th>Location</th><th>Date</th><th>Time</th><th>Transport / vessel</th><th>Voyage</th><th>State</th><th></th></tr></thead><tbody></tbody></table></div><button type="button" class="secondary journey-add-row">+ Add event</button><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button type="submit">Save journey</button></div></form>`;
+  document.body.append(dialog);
+  const form = dialog.querySelector('form');
+  const body = dialog.querySelector('tbody');
+  const eventTypes = [
+    ['GATE_OUT', 'Gated out'], ['GATE_IN', 'Gated in'], ['LOAD', 'Loaded'],
+    ['DEPARTURE', 'Vessel departed'], ['ARRIVAL', 'Vessel arrived'],
+    ['DISCHARGE', 'Discharged'], ['TRANSSHIPMENT', 'Transshipment'],
+    ['DELAY', 'Delayed'], ['DELIVERY', 'Delivered'], ['CUSTOM', 'Other event']
+  ];
+  const localParts = value => {
+    if (!value) return { date: '', time: '' };
+    const parsed = new Date(value);
+    const pad = number => String(number).padStart(2, '0');
+    return { date: `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`, time: `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}` };
+  };
+  const addRow = (event = {}) => {
+    const row = document.createElement('tr');
+    const parts = localParts(event.event_time);
+    row.dataset.providerEventId = event.provider_event_id || '';
+    row.innerHTML = `<td><select data-event-code required>${eventTypes.map(([code, label]) => `<option value="${code}" ${event.event_code === code ? 'selected' : ''}>${label}</option>`).join('')}</select></td><td><input data-description required value="${escapeHtml(event.description || eventTypes[0][1])}" placeholder="Event name"></td><td><input data-location required value="${escapeHtml(event.location)}" placeholder="Hamburg"></td><td><input data-date type="date" required value="${parts.date}"></td><td><input data-time type="text" inputmode="numeric" required pattern="(?:[01]\\d|2[0-3]):[0-5]\\d" maxlength="5" value="${parts.time}" placeholder="HH:MM" aria-label="Time in 24-hour format"></td><td><input data-transport value="${escapeHtml(event.vessel || event.transport_mode)}" placeholder="Truck or vessel name"></td><td><input data-voyage value="${escapeHtml(event.voyage)}" placeholder="632E"></td><td><select data-state><option value="confirmed" ${event.is_estimated ? '' : 'selected'}>Confirmed</option><option value="planned" ${event.is_estimated ? 'selected' : ''}>Planned</option></select></td><td><div class="journey-row-actions"><button type="button" class="journey-move-up secondary" aria-label="Move event up" title="Move up">↑</button><button type="button" class="journey-move-down secondary" aria-label="Move event down" title="Move down">↓</button><button type="button" class="journey-remove-row secondary" aria-label="Remove event" title="Remove">×</button></div></td>`;
+    const type = row.querySelector('[data-event-code]');
+    let previousDefault = eventTypes.find(([code]) => code === type.value)?.[1] || '';
+    type.onchange = () => {
+      const description = row.querySelector('[data-description]');
+      const nextDefault = eventTypes.find(([code]) => code === type.value)?.[1] || '';
+      if (!description.value.trim() || description.value === previousDefault) description.value = nextDefault;
+      previousDefault = nextDefault;
+    };
+    row.querySelector('.journey-remove-row').onclick = () => {
+      if (body.rows.length === 1) return showToast('A journey needs at least one event.', 'error');
+      row.remove();
+    };
+    row.querySelector('.journey-move-up').onclick = () => {
+      const previous = row.previousElementSibling;
+      if (previous) body.insertBefore(row, previous);
+    };
+    row.querySelector('.journey-move-down').onclick = () => {
+      const next = row.nextElementSibling;
+      if (next) body.insertBefore(next, row);
+    };
+    body.append(row);
+  };
+  (record.events?.length ? record.events : [{}]).forEach(addRow);
+  dialog.querySelector('.journey-add-row').onclick = () => addRow({});
+  dialog.querySelectorAll('[data-cancel]').forEach(button => button.onclick = () => dialog.close());
+  dialog.addEventListener('close', () => dialog.remove());
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const submit = form.querySelector('[type="submit"]');
+    const events = [...body.rows].map((row, index) => {
+      const transport = row.querySelector('[data-transport]').value.trim();
+      const eventTime = new Date(`${row.querySelector('[data-date]').value}T${row.querySelector('[data-time]').value}`).toISOString();
+      return {
+        providerEventId: row.dataset.providerEventId,
+        sortOrder: index,
+        eventCode: row.querySelector('[data-event-code]').value,
+        description: row.querySelector('[data-description]').value,
+        location: row.querySelector('[data-location]').value,
+        eventTime,
+        vessel: transport,
+        voyage: row.querySelector('[data-voyage]').value,
+        transportMode: /^truck$/i.test(transport) ? 'TRUCK' : transport ? 'VESSEL' : '',
+        isEstimated: row.querySelector('[data-state]').value === 'planned'
+      };
+    });
+    submit.disabled = true;
+    submit.textContent = 'Saving journey…';
+    try {
+      const updated = await api(`/api/shipment-tracking/${record.id}/journey`, { method: 'PUT', body: JSON.stringify({ events }) });
+      dialog.close();
+      await loadTrackingRecords(updated.id);
+      document.querySelector('.tracking-journey')?.setAttribute('open', '');
+      showToast('Container journey saved. Summary updated from confirmed events.');
+    } catch (error) {
+      submit.disabled = false;
+      submit.textContent = 'Save journey';
+      message(form, error.message);
+    }
+  };
+  dialog.showModal();
 }
 
 function showTrackingUpdateDialog(record) {

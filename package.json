@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/start.js",
-    "check": "node --check server/index.js && node --check server/start.js && node --check api/index.js && node --check server/db.js && node --check server/mongo/connection.js && node --check server/mongo/models.js && node --check scripts/migrate-to-mongo.js && node --check scripts/reset-admin-password.js && node --check public/app.js",
+    "check": "node --check server/index.js && node --check server/start.js && node --check api/index.js && node --check server/db.js && node --check server/mongo/connection.js && node --check server/mongo/models.js && node --check server/tracking/providers.js && node --check scripts/migrate-to-mongo.js && node --check scripts/reset-admin-password.js && node --check public/app.js",
     "reset-admin-password": "node scripts/reset-admin-password.js",
     "migrate:mongo": "node scripts/migrate-to-mongo.js"
   },

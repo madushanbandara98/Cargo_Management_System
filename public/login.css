@@ -34,10 +34,10 @@
 .mobile-brand {
   display: flex;
   align-items: center;
-  gap: .85rem;
+  gap: .9rem;
   font-size: 1.05rem;
   font-weight: 800;
-  letter-spacing: -.01em;
+  letter-spacing: .01em;
 }
 
 .showcase-logo {
@@ -52,12 +52,20 @@
   box-shadow: 0 10px 30px rgba(240,212,5,.18);
 }
 
-.showcase-logo svg { width: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.showcase-business:empty::after { content: "Cargo Management"; }
+.showcase-logo svg {
+  width: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.showcase-business:empty::after { content: "Container Desk"; }
 
 .showcase-copy { position: relative; z-index: 1; max-width: 620px; margin: auto 0; padding: 4rem 0; }
 .showcase-kicker { margin: 0 0 1rem; color: #f0d405; font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.showcase-copy h1 { max-width: 580px; margin: 0; font-size: clamp(2.45rem, 4.8vw, 4.5rem); line-height: 1.02; letter-spacing: -.055em; }
+.showcase-copy h1 { max-width: 580px; margin: 0; font-size: clamp(2.45rem, 4.8vw, 4.5rem); line-height: 1.04; letter-spacing: -.025em; }
 .showcase-copy > p:last-child { max-width: 520px; margin: 1.5rem 0 0; color: #c8ced9; font-size: clamp(1rem, 1.4vw, 1.15rem); line-height: 1.7; }
 .showcase-status { position: relative; z-index: 1; display: flex; align-items: center; gap: .65rem; color: #c8ced9; font-size: .85rem; }
 .status-pulse { width: 9px; height: 9px; border-radius: 50%; background: #38d98a; box-shadow: 0 0 0 5px rgba(56,217,138,.13); }
@@ -67,7 +75,7 @@
 .mobile-brand { display: none; margin-bottom: 3rem; color: #20283a; }
 .login-heading { margin-bottom: 2rem; }
 .login-eyebrow { margin: 0 0 .7rem; color: #aa9300; font-size: .76rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
-.login-heading h2 { margin: 0; color: #171d2a; font-size: clamp(1.85rem, 3vw, 2.35rem); letter-spacing: -.035em; }
+.login-heading h2 { margin: 0; color: #171d2a; font-size: clamp(1.85rem, 3vw, 2.35rem); line-height: 1.15; letter-spacing: -.015em; }
 .login-heading > p:last-child { margin: .8rem 0 0; color: #687086; line-height: 1.55; }
 
 .login-card form { gap: .7rem; }

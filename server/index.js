@@ -7,7 +7,8 @@ import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
 import PDFDocument from 'pdfkit';
 import { connectMongo } from './mongo/connection.js';
-import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, Payment, ShipmentTracking, nextMongoSourceId } from './mongo/models.js';
+import { User, Container, Customer, Consignment, BoxItem, Invoice, Document, Payment, ShipmentTracking, TrackingEvent, nextMongoSourceId } from './mongo/models.js';
+import { createTrackingProvider, normalizeTrackingStatus, trackingProviderName } from './tracking/providers.js';
 
 const app = express();
 const serverStartedAt = new Date();
@@ -109,13 +110,82 @@ function containerNumber(value) {
   return normalized;
 }
 
-function presentTracking(row) {
+function presentTracking(row, events = []) {
   return {
     id: row._id.toString(), container_number: row.containerNumber, carrier: row.carrier, tracking_url: row.trackingUrl,
     origin: row.origin, destination: row.destination, vessel: row.vessel,
     latest_status: row.latestStatus, status: row.status, eta: row.eta,
-    created_at: row.createdAt, updated_at: row.updatedAt
+    provider: row.provider || 'manual', provider_reference_id: row.providerReferenceId || '',
+    carrier_code: row.carrierCode || '', sync_status: row.syncStatus || 'MANUAL',
+    last_synced_at: row.lastSyncedAt || null, provider_error: row.providerError || '',
+    created_at: row.createdAt, updated_at: row.updatedAt,
+    events: events.map(event => ({
+      id: event._id.toString(), provider_event_id: event.providerEventId,
+      event_code: event.eventCode, status: event.normalizedStatus,
+      description: event.description, sort_order: event.sortOrder, event_time: event.eventTime,
+      is_estimated: event.isEstimated, location: event.location,
+      facility: event.facility, vessel: event.vessel, voyage: event.voyage,
+      transport_mode: event.transportMode
+    }))
   };
+}
+
+async function trackingEventsFor(records) {
+  const events = await TrackingEvent.find({ tracking: { $in: records.map(record => record._id) } }).sort({ sortOrder: 1, eventTime: 1, receivedAt: 1 }).lean();
+  const grouped = new Map();
+  events.forEach(event => {
+    const key = event.tracking.toString();
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(event);
+  });
+  return grouped;
+}
+
+async function updateTrackingProjection(record) {
+  const events = await TrackingEvent.find({ tracking: record._id }).sort({ sortOrder: 1, eventTime: 1, receivedAt: 1 }).lean();
+  const actualEvents = events.filter(event => !event.isEstimated);
+  const latest = actualEvents.at(-1);
+  const estimatedArrival = events.find(event => event.isEstimated && event.eventCode === 'ARRIVAL' && event.eventTime > new Date());
+  const vesselEvent = [...actualEvents].reverse().find(event => event.vessel);
+  const locations = events.filter(event => event.location);
+  if (latest) {
+    record.latestStatus = latest.description;
+    record.status = latest.normalizedStatus;
+  }
+  record.origin = locations[0]?.location || record.origin;
+  record.destination = locations.at(-1)?.location || record.destination;
+  record.vessel = vesselEvent?.vessel || record.vessel;
+  record.eta = estimatedArrival?.eventTime || record.eta;
+  record.updatedAt = new Date();
+  record.lastSyncedAt = new Date();
+  record.syncStatus = record.provider === 'manual' ? 'MANUAL' : record.status === 'DELIVERED' ? 'COMPLETED' : 'ACTIVE';
+  record.providerError = '';
+  await record.save();
+  return events;
+}
+
+async function ingestTrackingEvents(record, provider, events) {
+  const receivedAt = new Date();
+  for (const [index, source] of events.entries()) {
+    const eventTime = new Date(source.eventTime);
+    if (!source.providerEventId || !source.eventCode || !source.description || Number.isNaN(eventTime.getTime())) throw new Error('Tracking provider returned an invalid event.');
+    await TrackingEvent.findOneAndUpdate({ provider, providerEventId: String(source.providerEventId) }, {
+      tracking: record._id, provider, providerEventId: String(source.providerEventId),
+      eventCode: String(source.eventCode).toUpperCase(), normalizedStatus: normalizeTrackingStatus(source),
+      description: String(source.description), sortOrder: Number.isFinite(Number(source.sortOrder)) ? Number(source.sortOrder) : index,
+      eventTime, isEstimated: Boolean(source.isEstimated),
+      location: String(source.location || ''), facility: String(source.facility || ''),
+      vessel: String(source.vessel || ''), voyage: String(source.voyage || ''),
+      transportMode: String(source.transportMode || ''), rawPayload: source, receivedAt
+    }, { upsert: true, new: true, runValidators: true });
+  }
+  return updateTrackingProjection(record);
+}
+
+function secureTokenMatches(actual, expected) {
+  const left = Buffer.from(String(actual || ''));
+  const right = Buffer.from(String(expected || ''));
+  return left.length === right.length && left.length > 0 && crypto.timingSafeEqual(left, right);
 }
 
 function escapeHtml(value) {
@@ -538,9 +608,25 @@ app.put('/api/administrators/:id', requireAuth, requireOwner, async (req, res) =
   }
 });
 
+app.post('/api/tracking/webhooks/:provider', async (req, res) => {
+  try {
+    const secret = process.env.TRACKING_WEBHOOK_SECRET?.trim();
+    if (!secret) return res.status(503).json({ error: 'Tracking webhooks are not configured.' });
+    if (!secureTokenMatches(req.get('x-tracking-webhook-secret'), secret)) return res.status(401).json({ error: 'Invalid tracking webhook credentials.' });
+    const provider = text(req.params.provider, 'Provider', { required: true }).toLowerCase();
+    const referenceId = text(req.body.referenceId, 'Provider reference', { required: true });
+    if (!Array.isArray(req.body.events) || !req.body.events.length) throw new Error('At least one tracking event is required.');
+    const record = await ShipmentTracking.findOne({ provider, providerReferenceId: referenceId });
+    if (!record) return res.status(404).json({ error: 'Tracking subscription not found.' });
+    await ingestTrackingEvents(record, provider, req.body.events);
+    res.status(202).json({ accepted: req.body.events.length });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 app.get('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) => {
   const records = await ShipmentTracking.find().sort({ updatedAt: -1 }).lean();
-  res.json(records.map(presentTracking));
+  const events = await trackingEventsFor(records);
+  res.json(records.map(record => presentTracking(record, events.get(record._id.toString()) || [])));
 });
 
 app.post('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) => {
@@ -557,17 +643,110 @@ app.post('/api/shipment-tracking', requireAuth, requireAdmin, async (req, res) =
       if (parsedUrl.protocol !== 'https:') throw new Error('The official tracking URL must start with https://.');
       trackingUrl = parsedUrl.toString();
     } else if (!supportedCarriers.includes(carrier)) throw new Error('Select a supported carrier.');
-    const existing = await ShipmentTracking.findOne({ containerNumber: normalized });
-    if (existing) return res.json(presentTracking(existing));
+    const existing = await ShipmentTracking.findOne({ containerNumber: normalized }).lean();
+    if (existing) {
+      const grouped = await trackingEventsFor([existing]);
+      return res.json(presentTracking(existing, grouped.get(existing._id.toString()) || []));
+    }
     const now = new Date();
+    const providerName = carrier === 'OTHER' ? 'manual' : trackingProviderName();
     const record = await ShipmentTracking.create({
       sqliteId: await nextMongoSourceId(ShipmentTracking), containerNumber: normalized,
-      carrier, trackingUrl, createdBy: req.user.id, createdAt: now, updatedAt: now
+      carrier, trackingUrl, provider: providerName, syncStatus: providerName === 'manual' ? 'MANUAL' : 'SUBSCRIBING',
+      createdBy: req.user.id, createdAt: now, updatedAt: now
     });
-    res.status(201).json(presentTracking(record));
+    let events = [];
+    if (providerName !== 'manual') {
+      try {
+        const provider = createTrackingProvider(providerName);
+        const subscription = await provider.subscribe({ containerNumber: normalized, carrier });
+        record.providerReferenceId = subscription.referenceId;
+        record.carrierCode = subscription.carrierCode;
+        events = await ingestTrackingEvents(record, providerName, subscription.events || []);
+      } catch (providerError) {
+        record.syncStatus = 'ERROR';
+        record.providerError = providerError.message;
+        await record.save();
+      }
+    }
+    res.status(201).json(presentTracking(record, events));
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'This container is already being tracked.' : error.message });
   }
+});
+
+app.post('/api/shipment-tracking/:id/simulate', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const record = await ShipmentTracking.findById(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
+    if (record.provider !== 'mock') return res.status(409).json({ error: 'Simulation is available only for mock tracking subscriptions.' });
+    const events = await TrackingEvent.find({ tracking: record._id }).sort({ sortOrder: 1, eventTime: 1 }).lean();
+    const next = createTrackingProvider('mock').nextEvent(record.providerReferenceId, events);
+    if (!next) return res.status(409).json({ error: 'The mock shipment has already completed its journey.' });
+    const updatedEvents = await ingestTrackingEvents(record, 'mock', [next]);
+    res.json(presentTracking(record, updatedEvents));
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.post('/api/shipment-tracking/:id/subscribe', requireAuth, requireAdmin, async (req, res) => {
+  let record;
+  try {
+    record = await ShipmentTracking.findById(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
+    const providerName = trackingProviderName();
+    const provider = createTrackingProvider(providerName);
+    record.provider = providerName;
+    record.syncStatus = 'SUBSCRIBING';
+    record.providerError = '';
+    await record.save();
+    const subscription = await provider.subscribe({ containerNumber: record.containerNumber, carrier: record.carrier });
+    record.providerReferenceId = subscription.referenceId;
+    record.carrierCode = subscription.carrierCode;
+    const events = await ingestTrackingEvents(record, providerName, subscription.events || []);
+    res.json(presentTracking(record, events));
+  } catch (error) {
+    if (record) {
+      record.syncStatus = 'ERROR';
+      record.providerError = error.message;
+      await record.save().catch(() => {});
+    }
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/shipment-tracking/:id/journey', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const record = await ShipmentTracking.findById(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
+    if (!Array.isArray(req.body.events) || !req.body.events.length || req.body.events.length > 50) throw new Error('Enter between 1 and 50 journey events.');
+    const allowedCodes = ['GATE_OUT', 'GATE_IN', 'LOAD', 'DEPARTURE', 'ARRIVAL', 'DISCHARGE', 'TRANSSHIPMENT', 'DELAY', 'DELIVERY', 'CUSTOM'];
+    const receivedAt = new Date();
+    const events = req.body.events.map((source, index) => {
+      const eventCode = text(source.eventCode, `Event ${index + 1} type`, { required: true }).toUpperCase();
+      if (!allowedCodes.includes(eventCode)) throw new Error(`Event ${index + 1} has an unsupported type.`);
+      const description = text(source.description, `Event ${index + 1} name`, { required: true });
+      const location = text(source.location, `Event ${index + 1} location`, { required: true });
+      const eventTime = new Date(source.eventTime);
+      if (Number.isNaN(eventTime.getTime())) throw new Error(`Event ${index + 1} needs a valid date and time.`);
+      const providerEventId = String(source.providerEventId || '').startsWith(`manual:${record._id}:`) ? source.providerEventId : `manual:${record._id}:${crypto.randomUUID()}`;
+      return {
+        tracking: record._id, provider: 'manual', providerEventId, eventCode,
+        normalizedStatus: normalizeTrackingStatus({ eventCode }), description, sortOrder: index, eventTime,
+        isEstimated: Boolean(source.isEstimated), location,
+        vessel: text(source.vessel, `Event ${index + 1} transport`),
+        voyage: text(source.voyage, `Event ${index + 1} voyage`),
+        transportMode: text(source.transportMode, `Event ${index + 1} transport mode`),
+        rawPayload: { source: 'manual', order: index }, receivedAt
+      };
+    });
+    await TrackingEvent.deleteMany({ tracking: record._id });
+    await TrackingEvent.insertMany(events);
+    record.provider = 'manual';
+    record.providerReferenceId = '';
+    record.providerError = '';
+    const savedEvents = await updateTrackingProjection(record);
+    res.json(presentTracking(record, savedEvents));
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 app.put('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, res) => {
@@ -591,6 +770,7 @@ app.put('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, res
 app.delete('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, res) => {
   const record = await ShipmentTracking.findByIdAndDelete(req.params.id);
   if (!record) return res.status(404).json({ error: 'Tracked shipment not found.' });
+  await TrackingEvent.deleteMany({ tracking: record._id });
   res.status(204).end();
 });
 

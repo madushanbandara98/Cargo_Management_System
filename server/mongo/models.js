@@ -133,10 +133,37 @@ const shipmentTrackingSchema = new Schema({
   latestStatus: { type: String, default: 'Not updated' },
   status: { type: String, required: true, enum: ['NOT_UPDATED', 'IN_TRANSIT', 'DELAYED', 'ARRIVING_SOON', 'DELIVERED'], default: 'NOT_UPDATED' },
   eta: { type: Date, default: null },
+  provider: { type: String, default: 'manual' },
+  providerReferenceId: { type: String, default: '' },
+  carrierCode: { type: String, default: '' },
+  syncStatus: { type: String, enum: ['MANUAL', 'SUBSCRIBING', 'ACTIVE', 'ERROR', 'COMPLETED'], default: 'MANUAL' },
+  lastSyncedAt: { type: Date, default: null },
+  providerError: { type: String, default: '' },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   createdAt: { type: Date, required: true },
   updatedAt: { type: Date, required: true }
 }, { versionKey: false });
+
+const trackingEventSchema = new Schema({
+  tracking: { type: Schema.Types.ObjectId, ref: 'ShipmentTracking', required: true, index: true },
+  provider: { type: String, required: true },
+  providerEventId: { type: String, required: true },
+  eventCode: { type: String, required: true },
+  normalizedStatus: { type: String, required: true, enum: ['NOT_UPDATED', 'IN_TRANSIT', 'DELAYED', 'ARRIVING_SOON', 'DELIVERED'] },
+  description: { type: String, required: true },
+  sortOrder: { type: Number, required: true, default: 0 },
+  eventTime: { type: Date, required: true },
+  isEstimated: { type: Boolean, required: true, default: false },
+  location: { type: String, default: '' },
+  facility: { type: String, default: '' },
+  vessel: { type: String, default: '' },
+  voyage: { type: String, default: '' },
+  transportMode: { type: String, default: '' },
+  rawPayload: { type: Schema.Types.Mixed, default: null },
+  receivedAt: { type: Date, required: true }
+}, { versionKey: false });
+trackingEventSchema.index({ tracking: 1, sortOrder: 1, eventTime: 1 });
+trackingEventSchema.index({ provider: 1, providerEventId: 1 }, { unique: true });
 
 const counterSchema = new Schema({
   _id: { type: String, required: true },
@@ -153,6 +180,7 @@ export const Invoice = models.Invoice || model('Invoice', invoiceSchema);
 export const Document = models.Document || model('Document', documentSchema);
 export const Payment = models.Payment || model('Payment', paymentSchema);
 export const ShipmentTracking = models.ShipmentTracking || model('ShipmentTracking', shipmentTrackingSchema);
+export const TrackingEvent = models.TrackingEvent || model('TrackingEvent', trackingEventSchema);
 export const Counter = models.Counter || model('Counter', counterSchema);
 
 export async function nextMongoSourceId(Model) {
