@@ -138,7 +138,7 @@ function ShipmentList({ shipments, administratorAccess, onOpen, onEdit, onDelete
         <div>
           <div className="shipment-heading"><h3>{shipment.name.replaceAll('_', ' ')}</h3>{administratorAccess && <span className={`shipment-status ${active ? 'is-active' : ''}`}>{active ? '● Active' : '○ Inactive'}</span>}</div>
           <p>Created {createdDate(shipment.created_at)}</p>
-          <div className="shipment-identifiers"><span className="shipment-metric shipment-customer-metric"><ShipmentIcon name="users" /><small>Customers</small><strong>{shipment.consignment_count}</strong></span><span className="shipment-metric"><small>Internal reference</small><strong>{shipment.reference}</strong></span><span className="shipment-metric"><small>Container number</small><strong>{shipment.container_number || 'Not assigned yet'}</strong></span></div>
+          <div className="shipment-identifiers"><span className="shipment-metric shipment-customer-metric"><ShipmentIcon name="users" /><small>Customers</small><strong>{shipment.consignment_count}</strong></span><span className="shipment-metric"><small>Internal reference</small><strong>{shipment.reference}</strong></span>{administratorAccess && <span className="shipment-metric"><small>Container number</small><strong>{shipment.container_number || 'Not assigned yet'}</strong></span>}</div>
         </div>
         <div className="shipment-actions">
           <button data-open-id={shipment.id} onClick={() => onOpen(shipment)}><ShipmentIcon name="open" /><span>Open shipment</span></button>

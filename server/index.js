@@ -775,11 +775,12 @@ app.delete('/api/shipment-tracking/:id', requireAuth, requireAdmin, async (req, 
 });
 
 app.get('/api/shipments', requireAuth, async (req, res) => {
-  const filter = ['OWNER', 'ADMIN'].includes(req.user.role) ? {} : { status: 'ACTIVE' };
+  const administratorAccess = ['OWNER', 'ADMIN'].includes(req.user.role);
+  const filter = administratorAccess ? {} : { status: 'ACTIVE' };
   const shipments = await Container.find(filter).sort({ createdAt: -1 }).lean();
   const counts = await Consignment.aggregate([{ $group: { _id: '$container', count: { $sum: 1 } } }]);
   const countMap = new Map(counts.map(row => [row._id.toString(), row.count]));
-  res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, container_number: row.containerNumber || '', status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
+  res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, ...(administratorAccess ? { container_number: row.containerNumber || '' } : {}), status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
 });
 
 app.get('/api/customers/by-reference/:reference', requireAuth, requireAdmin, async (req, res) => {
