@@ -21,7 +21,7 @@ app.use((req, res, next) => {
   res.set({
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
     Vary: 'Origin'
   });
@@ -67,7 +67,9 @@ function publicUser(user) {
 }
 
 async function sessionUser(req) {
-  const token = req.cookies.cargo_session;
+  const authorization = req.get('authorization') || '';
+  const bearerToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+  const token = bearerToken || req.cookies.cargo_session;
   if (!token) return null;
   let payload;
   try { payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }); }
@@ -475,7 +477,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   if (!user || user.enabled === false || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid username or password.' });
   const token = jwt.sign({ sessionVersion: user.sessionVersion || 0 }, jwtSecret(), { algorithm: 'HS256', subject: user._id.toString(), expiresIn: '8h' });
   res.cookie('cargo_session', token, { ...sessionCookieOptions(req), maxAge: 8 * 60 * 60 * 1000 });
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(user), ...(nativeAppOrigins.has(req.get('origin')) ? { session_token: token } : {}) });
  } catch (error) { next(error); }
 });
 
