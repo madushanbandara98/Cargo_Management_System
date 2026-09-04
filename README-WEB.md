@@ -32,6 +32,9 @@ cookie can be shared with native API requests. For iOS, add the deployed API
 hostname to `WKAppBoundDomains` in `ios/App/App/Info.plist` after the final API
 domain is known. This branch currently targets
 `https://cargo-management-system-ten.vercel.app` through `.env.native`.
+Native bearer sessions are stored with `@aparajita/capacitor-secure-storage`,
+which uses iOS Keychain and Android Keystore. The web build continues to use
+HTTP-only cookies and does not use the plugin's web storage fallback.
 
 ## Local development
 

@@ -1,9 +1,11 @@
 import { Capacitor } from '@capacitor/core';
+import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 
 const app = document.querySelector('#app');
 const apiBaseUrl = window.__CONTAINER_DESK_CONFIG__?.apiBaseUrl || '';
 const isNativeApp = Capacitor.isNativePlatform();
 let nativeSessionToken = '';
+const nativeSessionKey = 'cargo_session';
 let activeShipment = null;
 let activeConsignment = null;
 let editingItemId = null;
@@ -39,6 +41,10 @@ async function api(path, options = {}) {
     },
     ...options
   });
+  if (isNativeApp && response.status === 401 && path !== '/api/auth/login') {
+    nativeSessionToken = '';
+    await SecureStorage.removeItem(nativeSessionKey).catch(() => {});
+  }
   if (response.status === 204) return null;
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Request failed.');
@@ -100,7 +106,10 @@ async function login() {
   window.renderLogin({
     authenticate: async credentials => {
       const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(credentials) });
-      if (isNativeApp) nativeSessionToken = result.session_token || '';
+      if (isNativeApp) {
+        nativeSessionToken = result.session_token || '';
+        if (nativeSessionToken) await SecureStorage.setItem(nativeSessionKey, nativeSessionToken);
+      }
       return result;
     },
     loadBusiness: async () => (await api('/api/public/business')).businessName,
@@ -126,6 +135,7 @@ async function dashboard() {
   document.querySelector('#logout').onclick = async () => {
     await api('/api/auth/logout', { method: 'POST' });
     nativeSessionToken = '';
+    if (isNativeApp) await SecureStorage.removeItem(nativeSessionKey).catch(() => {});
     login();
   };
   document.querySelector('#new-shipment').onclick = () => { setActiveNavigation('new-shipment'); showNewShipmentForm(); };
@@ -1472,4 +1482,10 @@ function renderInvoiceWindow(target, snapshot, invoiceNumber, printAfterLoad, qr
 }
 
 window.addEventListener('popstate', () => dashboard());
-dashboard();
+async function startApplication() {
+  if (isNativeApp) {
+    nativeSessionToken = await SecureStorage.getItem(nativeSessionKey).catch(() => '') || '';
+  }
+  await dashboard();
+}
+startApplication();

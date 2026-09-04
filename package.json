@@ -21,6 +21,7 @@
     "migrate:mongo": "node scripts/migrate-to-mongo.js"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
     "@capacitor/android": "^8.5.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/ios": "^8.5.1",
