@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2732" height="2732" viewBox="0 0 2732 2732">
+  <rect width="2732" height="2732" fill="#151c2b"/>
+  <rect x="1006" y="766" width="720" height="720" rx="172" fill="#f0d405"/>
+  <g transform="translate(1078 844) scale(1.125)" fill="none" stroke="#18202f" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M64 174 256 78l192 96v244l-192 96-192-96Z"/>
+    <path d="m256 296 192-96M256 296 64 200M256 296v218M160 126l192 96"/>
+  </g>
+  <text x="1366" y="1675" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="112" font-weight="800" letter-spacing="5" text-anchor="middle">Container Desk</text>
+  <text x="1366" y="1780" fill="#aeb7c5" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="48" font-weight="600" letter-spacing="3" text-anchor="middle">CARGO OPERATIONS, SIMPLIFIED</text>
+</svg>
