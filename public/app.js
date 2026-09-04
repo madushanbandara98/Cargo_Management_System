@@ -266,6 +266,12 @@ function setActiveNavigation(id) {
   });
   const more = document.querySelector('#mobile-more');
   if (more) more.classList.toggle('active', ['customers', 'administrators', 'system-health', 'employees', 'settings'].includes(id));
+  document.querySelectorAll('.mobile-sheet-action').forEach(button => {
+    const active = button.dataset.target === id;
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
 }
 
 async function loadShipments() {
