@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 const app = document.querySelector('#app');
 const apiBaseUrl = window.__CONTAINER_DESK_CONFIG__?.apiBaseUrl || '';
 const isNativeApp = Capacitor.isNativePlatform();
+let nativeSessionToken = '';
 let activeShipment = null;
 let activeConsignment = null;
 let editingItemId = null;
@@ -31,7 +32,11 @@ async function api(path, options = {}) {
   const requestUrl = path.startsWith('/') ? `${apiBaseUrl}${path}` : path;
   const response = await fetch(requestUrl, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(nativeSessionToken ? { Authorization: `Bearer ${nativeSessionToken}` } : {}),
+      ...(options.headers || {})
+    },
     ...options
   });
   if (response.status === 204) return null;
@@ -93,7 +98,11 @@ async function login() {
   window.clearInterval(trackingStatusRefreshTimer);
   app.replaceChildren();
   window.renderLogin({
-    authenticate: credentials => api('/api/auth/login', { method: 'POST', body: JSON.stringify(credentials) }),
+    authenticate: async credentials => {
+      const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(credentials) });
+      if (isNativeApp) nativeSessionToken = result.session_token || '';
+      return result;
+    },
     loadBusiness: async () => (await api('/api/public/business')).businessName,
     onAuthenticated: dashboard
   });
@@ -114,7 +123,11 @@ async function dashboard() {
     document.title = `${business} · Dashboard`;
   } catch {}
   updateSidebarIdentity({ ...me.user, business_name: business });
-  document.querySelector('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); login(); };
+  document.querySelector('#logout').onclick = async () => {
+    await api('/api/auth/logout', { method: 'POST' });
+    nativeSessionToken = '';
+    login();
+  };
   document.querySelector('#new-shipment').onclick = () => { setActiveNavigation('new-shipment'); showNewShipmentForm(); };
   document.querySelector('#current-shipment').onclick = () => { setActiveNavigation('current-shipment'); showCurrentShipments(); };
   document.querySelector('#settings').onclick = () => { setActiveNavigation('settings'); showProfileSettings(currentUser); };
