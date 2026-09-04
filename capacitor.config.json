@@ -1,0 +1,13 @@
+{
+  "appId": "com.madushan.containerdesk",
+  "appName": "Container Desk",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorCookies": {
+      "enabled": true
+    }
+  }
+}

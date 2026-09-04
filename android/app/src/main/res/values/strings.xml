@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Container Desk</string>
+    <string name="title_activity_main">Container Desk</string>
+    <string name="package_name">com.madushan.containerdesk</string>
+    <string name="custom_url_scheme">com.madushan.containerdesk</string>
+</resources>

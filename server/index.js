@@ -13,7 +13,21 @@ import { createTrackingProvider, normalizeTrackingStatus, trackingProviderName }
 const app = express();
 const serverStartedAt = new Date();
 const recentServerErrors = [];
+const nativeAppOrigins = new Set(['capacitor://localhost', 'https://localhost']);
 app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (!origin || !nativeAppOrigins.has(origin)) return next();
+  res.set({
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
+    Vary: 'Origin'
+  });
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
 app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
 app.use(async (req, res, next) => {
@@ -27,6 +41,15 @@ function jwtSecret() {
   const secret = process.env.JWT_SECRET?.trim();
   if (!secret || secret.length < 32) throw new Error('JWT_SECRET must be set to at least 32 characters.');
   return secret;
+}
+
+function sessionCookieOptions(req) {
+  const nativeRequest = nativeAppOrigins.has(req.get('origin'));
+  return {
+    httpOnly: true,
+    sameSite: nativeRequest ? 'none' : 'lax',
+    secure: nativeRequest || process.env.NODE_ENV === 'production'
+  };
 }
 
 function publicUser(user) {
@@ -451,13 +474,13 @@ app.post('/api/auth/login', async (req, res, next) => {
   const user = await User.findOne({ username: new RegExp(`^${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).select('+passwordHash');
   if (!user || user.enabled === false || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid username or password.' });
   const token = jwt.sign({ sessionVersion: user.sessionVersion || 0 }, jwtSecret(), { algorithm: 'HS256', subject: user._id.toString(), expiresIn: '8h' });
-  res.cookie('cargo_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 });
+  res.cookie('cargo_session', token, { ...sessionCookieOptions(req), maxAge: 8 * 60 * 60 * 1000 });
   res.json({ user: publicUser(user) });
  } catch (error) { next(error); }
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('cargo_session', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+  res.clearCookie('cargo_session', sessionCookieOptions(req));
   res.status(204).end();
 });
 app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
@@ -516,7 +539,7 @@ app.put('/api/profile/password', requireAuth, requireAdmin, async (req, res) => 
     administrator.passwordHash = bcrypt.hashSync(newPassword, 12);
     administrator.sessionVersion = Number(administrator.sessionVersion || 0) + 1;
     await administrator.save();
-    res.clearCookie('cargo_session', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+    res.clearCookie('cargo_session', sessionCookieOptions(req));
     res.status(204).end();
   } catch (error) {
     res.status(400).json({ error: error.message });

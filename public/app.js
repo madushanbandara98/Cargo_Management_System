@@ -1,4 +1,8 @@
+import { Capacitor } from '@capacitor/core';
+
 const app = document.querySelector('#app');
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const isNativeApp = Capacitor.isNativePlatform();
 let activeShipment = null;
 let activeConsignment = null;
 let editingItemId = null;
@@ -21,7 +25,15 @@ const carrierTrackingUrls = {
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+  if (isNativeApp && !apiBaseUrl) {
+    throw new Error('The mobile app API address is not configured. Rebuild with VITE_API_BASE_URL set to the deployed HTTPS API.');
+  }
+  const requestUrl = path.startsWith('/') ? `${apiBaseUrl}${path}` : path;
+  const response = await fetch(requestUrl, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options
+  });
   if (response.status === 204) return null;
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Request failed.');

@@ -5,6 +5,34 @@ MongoDB Atlas. On Vercel, Express runs as a serverless Function from
 `api/index.js`. The retained SQLite database is used only by the one-time local
 migration and is not read by the deployed application.
 
+## Native mobile development
+
+This branch also contains Capacitor projects for Android and iOS. The native
+applications reuse the Vite frontend and communicate with the deployed Express
+API; they must never connect directly to MongoDB.
+
+Set the public HTTPS API address when producing a native build:
+
+```bash
+npm run build:native
+```
+
+Then open a generated native project:
+
+```bash
+npm run native:android
+npm run native:ios
+```
+
+Android development requires Android Studio. iOS development requires Xcode
+on macOS. The API must explicitly allow the native application origin, and its
+authentication flow must be tested on real devices before distribution.
+Capacitor's native cookie bridge is enabled so the existing HTTP-only session
+cookie can be shared with native API requests. For iOS, add the deployed API
+hostname to `WKAppBoundDomains` in `ios/App/App/Info.plist` after the final API
+domain is known. This branch currently targets
+`https://cargo-management-system-ten.vercel.app` through `.env.native`.
+
 ## Local development
 
 1. Copy `.env.example` to `.env`.
