@@ -551,9 +551,19 @@ input:focus { border-color: #b9a300 !important; box-shadow: 0 0 0 3px rgba(240,2
   .mobile-nav-sheet header small { color: var(--dash-muted); font-weight: 700; }
   .mobile-nav-sheet header h2 { margin: .15rem 0 0; font-size: 1.35rem; }
   .mobile-sheet-close { width: 42px; height: 42px; padding: 0; color: #344054; background: #edf0f4 !important; font-size: 1.5rem; }
-  .mobile-sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
-  .mobile-sheet-action { min-height: 52px; color: #202838; border: 1px solid #dce1e8; background: #f7f8fa !important; text-align: left; }
-  .mobile-sheet-signout { grid-column: 1 / -1; color: #a62922; border-color: #f1c9c5; background: #fff4f2 !important; }
+  .mobile-sheet-actions { display: grid; grid-template-columns: 1fr; gap: .55rem; }
+  .mobile-sheet-action { display: grid; min-height: 64px; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: .8rem; padding: .65rem .8rem; color: #202838; border: 1px solid #dce1e8; border-radius: 12px; background: #f8f9fb !important; text-align: left; box-shadow: none !important; }
+  .mobile-sheet-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #544900; background: #fff3a3; font-size: 1.15rem; }
+  .mobile-sheet-copy strong,
+  .mobile-sheet-copy small { display: block; }
+  .mobile-sheet-copy strong { font-size: .9rem; }
+  .mobile-sheet-copy small { margin-top: .16rem; color: var(--dash-muted); font-size: .7rem; font-weight: 550; }
+  .mobile-sheet-chevron { color: #8791a2; font-size: 1.45rem; font-weight: 400; }
+  .mobile-sheet-signout { margin-top: .35rem; color: #a62922; border-color: #f1c9c5; background: #fff4f2 !important; }
+  .mobile-sheet-signout .mobile-sheet-icon { color: #a62922; background: #ffe2de; }
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea { font-size: 16px !important; }
 }
 
 /* Business settings is intentionally isolated from shipment-page styling. */

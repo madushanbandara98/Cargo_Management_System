@@ -231,12 +231,21 @@ function setupMobileNavigation() {
   sheet.innerHTML = '<button type="button" class="mobile-sheet-backdrop" aria-label="Close menu"></button><section role="dialog" aria-modal="true" aria-labelledby="mobile-menu-title"><header><div><small>Container Desk</small><h2 id="mobile-menu-title">More</h2></div><button type="button" class="mobile-sheet-close" aria-label="Close menu">×</button></header><div class="mobile-sheet-actions"></div></section>';
   document.querySelector('.layout').append(sheet);
   const actions = sheet.querySelector('.mobile-sheet-actions');
+  const menuDetails = {
+    customers: ['▤', 'Customers', 'Customer directory and details'],
+    administrators: ['♛', 'Administrators', 'Manage administrator access'],
+    'system-health': ['◒', 'System health', 'Application and database status'],
+    employees: ['♟', 'Employees', 'Manage employee accounts'],
+    settings: ['⚙', 'Settings', 'Account and business details'],
+    logout: ['↪', 'Sign out', 'End this secure session']
+  };
   [...secondaryButtons, document.querySelector('#logout')].forEach(button => {
+    const [icon, label, description] = menuDetails[button.id];
     const proxy = document.createElement('button');
     proxy.type = 'button';
     proxy.className = button.id === 'logout' ? 'mobile-sheet-action mobile-sheet-signout' : 'mobile-sheet-action';
     proxy.dataset.target = button.id;
-    proxy.textContent = button.textContent || 'Sign out';
+    proxy.innerHTML = `<span class="mobile-sheet-icon" aria-hidden="true">${icon}</span><span class="mobile-sheet-copy"><strong>${label}</strong><small>${description}</small></span><span class="mobile-sheet-chevron" aria-hidden="true">›</span>`;
     proxy.onclick = () => { close(); button.click(); };
     actions.append(proxy);
   });
