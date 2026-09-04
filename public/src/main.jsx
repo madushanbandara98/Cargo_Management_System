@@ -167,6 +167,9 @@ window.renderShipmentList = (node, properties) => {
 const root = createRoot(document.getElementById('react-root'));
 window.renderLogin = properties => root.render(<LoginPage {...properties} />);
 window.clearReactView = () => root.render(null);
+window.__CONTAINER_DESK_CONFIG__ = Object.freeze({
+  apiBaseUrl: String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+});
 
 // The existing interface remains behavior-compatible while Vite owns the
 // frontend build. New screens can now be migrated to React incrementally.

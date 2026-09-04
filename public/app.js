@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 
 const app = document.querySelector('#app');
-const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const apiBaseUrl = window.__CONTAINER_DESK_CONFIG__?.apiBaseUrl || '';
 const isNativeApp = Capacitor.isNativePlatform();
 let activeShipment = null;
 let activeConsignment = null;
