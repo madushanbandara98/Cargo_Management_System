@@ -197,6 +197,7 @@ async function dashboard() {
     document.querySelector('#new-shipment').classList.add('hidden');
     document.querySelector('#settings').classList.add('hidden');
   }
+  setupMobileNavigation();
   window.renderCreateShipmentForm(document.querySelector('#shipment-form'), {
     createShipment: details => api('/api/shipments', { method: 'POST', body: JSON.stringify(details) }),
     onCancel: showCurrentShipments,
@@ -210,6 +211,42 @@ async function dashboard() {
   setActiveNavigation('current-shipment');
 }
 
+function setupMobileNavigation() {
+  const navigation = document.querySelector('.sidebar-nav');
+  const secondaryIds = ['customers', 'administrators', 'system-health', 'employees', 'settings'];
+  const secondaryButtons = secondaryIds.map(id => document.querySelector(`#${id}`)).filter(button => button && !button.classList.contains('hidden'));
+  secondaryButtons.forEach(button => button.classList.add('mobile-secondary-nav'));
+  document.querySelector('#logout').classList.add('mobile-secondary-nav');
+
+  const moreButton = document.createElement('button');
+  moreButton.id = 'mobile-more';
+  moreButton.className = 'nav-button mobile-more-button';
+  moreButton.type = 'button';
+  moreButton.textContent = 'More';
+  navigation.append(moreButton);
+
+  const sheet = document.createElement('div');
+  sheet.className = 'mobile-nav-sheet hidden';
+  sheet.setAttribute('aria-hidden', 'true');
+  sheet.innerHTML = '<button type="button" class="mobile-sheet-backdrop" aria-label="Close menu"></button><section role="dialog" aria-modal="true" aria-labelledby="mobile-menu-title"><header><div><small>Container Desk</small><h2 id="mobile-menu-title">More</h2></div><button type="button" class="mobile-sheet-close" aria-label="Close menu">×</button></header><div class="mobile-sheet-actions"></div></section>';
+  document.querySelector('.layout').append(sheet);
+  const actions = sheet.querySelector('.mobile-sheet-actions');
+  [...secondaryButtons, document.querySelector('#logout')].forEach(button => {
+    const proxy = document.createElement('button');
+    proxy.type = 'button';
+    proxy.className = button.id === 'logout' ? 'mobile-sheet-action mobile-sheet-signout' : 'mobile-sheet-action';
+    proxy.dataset.target = button.id;
+    proxy.textContent = button.textContent || 'Sign out';
+    proxy.onclick = () => { close(); button.click(); };
+    actions.append(proxy);
+  });
+  const open = () => { sheet.classList.remove('hidden'); sheet.setAttribute('aria-hidden', 'false'); };
+  const close = () => { sheet.classList.add('hidden'); sheet.setAttribute('aria-hidden', 'true'); };
+  moreButton.onclick = open;
+  sheet.querySelector('.mobile-sheet-backdrop').onclick = close;
+  sheet.querySelector('.mobile-sheet-close').onclick = close;
+}
+
 function setActiveNavigation(id) {
   if (id !== 'system-health') document.querySelector('#system-health-panel')?.classList.add('hidden');
   document.querySelectorAll('.sidebar-nav .nav-button').forEach(button => {
@@ -218,6 +255,8 @@ function setActiveNavigation(id) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  const more = document.querySelector('#mobile-more');
+  if (more) more.classList.toggle('active', ['customers', 'administrators', 'system-health', 'employees', 'settings'].includes(id));
 }
 
 async function loadShipments() {
