@@ -360,14 +360,47 @@ function normalizeInvoiceLinePricing(snapshot) {
   return { ratePerCubic: rate, items: normalizedItems, repaired };
 }
 
-export async function createInvoicePdf(invoice, baseUrl = '') {
-  const pricing = normalizeInvoiceLinePricing(invoice.snapshot);
+async function prepareInvoiceSnapshotForPdf(invoice) {
+  const snapshot = invoice.snapshot || {};
+  const storedRate = Number(snapshot.ratePerCubic);
+  const storedItems = Array.isArray(snapshot.items) ? snapshot.items : [];
+  const storedLinesAreInvalid = !Number.isFinite(storedRate) || storedRate <= 0 || storedItems.some(item => !Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0);
+
+  // If an older invoice has an unusable line snapshot, use the same live,
+  // validated consignment calculation used by the preview before rendering.
+  if (storedLinesAreInvalid) {
+    const current = await presentConsignment(invoice.consignment);
+    if (current && current.rate_per_cubic > 0 && current.items.length && current.items.every(item => item.amount > 0)) {
+      invoice.snapshot = {
+        ...snapshot,
+        items: current.items,
+        ratePerCubic: current.rate_per_cubic,
+        deliveryCharge: current.delivery_charge,
+        discount: current.discount,
+        grossTotal: current.gross_total,
+        itemsTotal: current.total_amount,
+        finalTotal: current.final_total,
+        amountPaid: current.amount_paid,
+        balanceDue: current.balance_due,
+        paymentStatus: current.payment_status
+      };
+      invoice.markModified('snapshot');
+      await invoice.save();
+      return invoice.snapshot;
+    }
+  }
+
+  const pricing = normalizeInvoiceLinePricing(snapshot);
   if (pricing.repaired && typeof invoice.save === 'function') {
-    invoice.snapshot = { ...invoice.snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
+    invoice.snapshot = { ...snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
     invoice.markModified('snapshot');
     await invoice.save();
   }
-  const snapshot = { ...invoice.snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
+  return { ...invoice.snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
+}
+
+export async function createInvoicePdf(invoice, baseUrl = '') {
+  const snapshot = await prepareInvoiceSnapshotForPdf(invoice);
   const publicUrl = snapshot.publicUrl || `${baseUrl || 'http://localhost:3000'}/delivery/${invoice.publicToken}`;
   return new Promise((resolve, reject) => {
     const document = new PDFDocument({ size: 'A4', margin: 42, bufferPages: true });
