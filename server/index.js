@@ -318,11 +318,57 @@ function invoiceSnapshot(consignment, user) {
   };
 }
 
+function normalizeInvoiceLinePricing(snapshot) {
+  if (!Array.isArray(snapshot.items) || !snapshot.items.length) {
+    throw new Error('Invoice has no delivery items. Reissue the invoice after adding the items.');
+  }
+
+  const items = snapshot.items;
+  const totalVolume = items.reduce((sum, item) => {
+    const volume = Number(item.height_cm) * Number(item.width_cm) * Number(item.depth_cm) / 1_000_000;
+    return sum + (Number.isFinite(volume) ? volume * Number(item.quantity || 0) : 0);
+  }, 0);
+  const storedTotal = Number(snapshot.itemsTotal);
+  const storedRate = Number(snapshot.ratePerCubic);
+  let rate = storedRate;
+  let repaired = false;
+
+  // Older invoices can contain a valid subtotal but missing/zero line pricing.
+  // Recover the rate from the stored subtotal so an already-issued invoice
+  // does not show €0.00 for every line.
+  if (totalVolume > 0 && Number.isFinite(storedTotal) && storedTotal > 0 && (!Number.isFinite(rate) || rate <= 0)) {
+    rate = storedTotal / totalVolume;
+    repaired = true;
+  }
+  if (!Number.isFinite(rate) || rate < 0) {
+    throw new Error('Invoice has an invalid price rate. Correct the consignment and reissue the invoice.');
+  }
+
+  const normalizedItems = items.map(item => {
+    const cubic = Number(item.height_cm) * Number(item.width_cm) * Number(item.depth_cm) / 1_000_000;
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(cubic) || cubic < 0 || !Number.isFinite(quantity) || quantity < 1) {
+      throw new Error('Invoice contains an invalid delivery item. Correct the consignment and reissue the invoice.');
+    }
+    const amount = Number((cubic * quantity * rate).toFixed(2));
+    const cubicPerItem = Number(cubic.toFixed(3));
+    if (Number(item.amount) !== amount || Number(item.cubic_per_item) !== cubicPerItem) repaired = true;
+    return { ...item, cubic_per_item: cubicPerItem, amount };
+  });
+
+  if (Number(snapshot.ratePerCubic) !== rate) repaired = true;
+  return { ratePerCubic: rate, items: normalizedItems, repaired };
+}
+
 export async function createInvoicePdf(invoice, baseUrl = '') {
-  const snapshot = invoice.snapshot;
+  const pricing = normalizeInvoiceLinePricing(invoice.snapshot);
+  if (pricing.repaired && typeof invoice.save === 'function') {
+    invoice.snapshot = { ...invoice.snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
+    invoice.markModified('snapshot');
+    await invoice.save();
+  }
+  const snapshot = { ...invoice.snapshot, ratePerCubic: pricing.ratePerCubic, items: pricing.items };
   const publicUrl = snapshot.publicUrl || `${baseUrl || 'http://localhost:3000'}/delivery/${invoice.publicToken}`;
-  const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 360, margin: 1, errorCorrectionLevel: 'M' });
-  const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
   return new Promise((resolve, reject) => {
     const document = new PDFDocument({ size: 'A4', margin: 42, bufferPages: true });
     const chunks = [];
@@ -337,7 +383,9 @@ export async function createInvoicePdf(invoice, baseUrl = '') {
     const accentText = accentLuminance > .55 ? '#182536' : accent;
     const currency = snapshot.currency || 'EUR';
     const money = value => {
-      const amount = new Intl.NumberFormat('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0));
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) throw new Error('Invoice contains an invalid monetary value. Correct the invoice before downloading it.');
+      const amount = new Intl.NumberFormat('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numericValue);
       return currency === 'EUR' ? `€ ${amount}` : `${currency} ${amount}`;
     };
     const date = value => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value));
@@ -424,37 +472,11 @@ export async function createInvoicePdf(invoice, baseUrl = '') {
       y += rowHeight;
     });
     document.roundedRect(summaryX, detailsY, 198, y - detailsY, 6).lineWidth(.8).strokeColor('#d8dfe6').stroke();
-    document.image(qrBuffer, 455, y + 12, { width: 52, height: 52 });
-    document.fillColor('#536174').font('Helvetica').fontSize(6).text('Scan to view invoice', 511, y + 32, { width: 42 });
     document.moveTo(42, 690).lineTo(553, 690).lineWidth(.7).strokeColor('#dce2e8').stroke();
     const footerContacts = [snapshot.business.name, snapshot.business.phoneGermany, snapshot.business.phoneSriLanka, snapshot.business.email].filter(Boolean).join('  •  ');
     document.fillColor('#697688').font('Helvetica').fontSize(5.8).text(footerContacts, 42, 698, { width: 430 });
     document.text('Page 1 of 1', 500, 698, { width: 53, align: 'right' });
 
-    const itemLabels = snapshot.items.flatMap((item, itemIndex) => Array.from({ length: Number(item.quantity || 0) }, (_, quantityIndex) => ({
-      itemNumber: itemIndex + 1,
-      quantityNumber: quantityIndex + 1,
-      quantity: Number(item.quantity || 0),
-      description: item.description || 'Cargo item'
-    })));
-    for (let firstLabel = 0; firstLabel < itemLabels.length; firstLabel += 9) {
-      const labels = itemLabels.slice(firstLabel, firstLabel + 9);
-      document.addPage({ size: 'A4', margin: 28 });
-      document.rect(0, 0, document.page.width, document.page.height).fill('#FFFFFF');
-      labels.forEach((label, labelIndex) => {
-        const column = labelIndex % 3;
-        const row = Math.floor(labelIndex / 3);
-        const labelX = 28 + column * 180;
-        const labelY = 28 + row * 252;
-        const overallNumber = firstLabel + labelIndex + 1;
-        document.roundedRect(labelX, labelY, 166, 238, 8).lineWidth(.9).strokeColor('#d6dbe3').stroke();
-        document.fillColor('#111827').font('Helvetica-Bold').fontSize(9).text(String(snapshot.business.name || '').toUpperCase(), labelX + 10, labelY + 17, { width: 146, align: 'center' });
-        document.fillColor('#687086').font('Helvetica').fontSize(7).text(label.description, labelX + 10, labelY + 32, { width: 146, align: 'center' });
-        document.image(qrBuffer, labelX + 34, labelY + 51, { width: 98, height: 98 });
-        document.fillColor('#111827').font('Helvetica-Bold').fontSize(21).text(snapshot.customer.reference || '—', labelX + 10, labelY + 161, { width: 146, align: 'center' });
-        document.fontSize(10).text(`ITEM ${String(overallNumber).padStart(2, '0')}/${String(itemLabels.length).padStart(2, '0')}`, labelX + 10, labelY + 194, { width: 146, align: 'center' });
-      });
-    }
     document.end();
   });
 }
@@ -969,9 +991,14 @@ app.post('/api/shipments/:shipmentId/consignments', requireAuth, requireAdmin, a
     }
     const rate = number(req.body.ratePerCubic ?? 530, 'Rate per cubic metre', { min: 0 });
     const delivery = number(req.body.deliveryCharge ?? 0, 'Delivery charge', { min: 0 });
-    const existing = await Consignment.exists({ container: shipmentId, customer: customer._id });
+    const existing = await Consignment.findOne({ container: shipmentId, customer: customer._id });
+    if (existing && (existing.ratePerCubic !== rate || existing.deliveryCharge !== delivery)) {
+      if (await Invoice.exists({ consignment: existing._id, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: existing._id, status: 'ACTIVE' })) {
+        throw new Error('Pricing cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
+      }
+    }
     const consignment = existing
-      ? await Consignment.findOneAndUpdate({ container: shipmentId, customer: customer._id }, { ratePerCubic: rate, deliveryCharge: delivery, allItemsEntered: Boolean(req.body.allItemsEntered), updatedAt: new Date() }, { new: true, runValidators: true })
+      ? await Consignment.findOneAndUpdate({ _id: existing._id }, { ratePerCubic: rate, deliveryCharge: delivery, allItemsEntered: Boolean(req.body.allItemsEntered), updatedAt: new Date() }, { new: true, runValidators: true })
       : await Consignment.create({ sqliteId: await nextMongoSourceId(Consignment), container: shipmentId, customer: customer._id, ratePerCubic: rate, deliveryCharge: delivery, allItemsEntered: Boolean(req.body.allItemsEntered), createdAt: new Date(), updatedAt: new Date() });
     res.status(existing ? 200 : 201).json(await presentConsignment(consignment._id));
   } catch (error) { res.status(error.message === 'Shipment not found.' ? 404 : 400).json({ error: error.message }); }
@@ -1165,6 +1192,9 @@ app.post('/api/consignments/:id/invoices', requireAuth, requireAdmin, async (req
   const consignment = await presentConsignment(req.params.id);
   if (!consignment) return res.status(404).json({ error: 'Customer delivery not found.' });
   if (!consignment.items.length) return res.status(400).json({ error: 'Add at least one delivery item before issuing an invoice.' });
+  if (!Number.isFinite(Number(consignment.rate_per_cubic)) || Number(consignment.rate_per_cubic) <= 0 || consignment.items.some(item => !Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0)) {
+    return res.status(400).json({ error: 'Set a valid positive rate and verify every box amount before issuing the invoice.' });
+  }
   const year = new Date().getFullYear();
   const prefix = String(req.user.invoice_prefix || 'INV').replace(/[^A-Za-z0-9_-]/g, '').toUpperCase() || 'INV';
   const numberPrefix = `${prefix}-${year}-`;
@@ -1194,6 +1224,18 @@ app.get('/api/invoices/:id/pdf', requireAuth, requireAdmin, async (req, res) => 
     res.send(pdf);
   } catch (error) {
     res.status(error.message === 'Issued invoice not found.' ? 404 : 500).send(error.message);
+  }
+});
+
+app.get('/api/invoices/:id/qr-label', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne({ _id: req.params.id, status: { $ne: 'VOID' } });
+    if (!invoice) return res.status(404).json({ error: 'Issued invoice not found.' });
+    const publicUrl = String(invoice.snapshot.publicUrl || `${req.protocol}://${req.get('host')}/delivery/${invoice.publicToken}`);
+    const qrDataUrl = await QRCode.toDataURL(publicUrl, { width: 360, margin: 1, errorCorrectionLevel: 'M' });
+    res.json({ qrDataUrl, publicUrl, invoiceNumber: invoice.invoiceNumber });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1283,6 +1325,9 @@ app.post('/api/consignments/:id/items', requireAuth, requireAdmin, async (req, r
   try {
     const consignmentId = req.params.id;
     if (!await Consignment.exists({ _id: consignmentId })) throw new Error('Consignment not found.');
+    if (await Invoice.exists({ consignment: consignmentId, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: consignmentId, status: 'ACTIVE' })) {
+      throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
+    }
     await BoxItem.create({ sqliteId: await nextMongoSourceId(BoxItem), consignment: consignmentId, heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description'), createdAt: new Date() });
     res.status(201).json(await presentConsignment(consignmentId));
   } catch (error) { res.status(error.message === 'Consignment not found.' ? 404 : 400).json({ error: error.message }); }
@@ -1293,6 +1338,9 @@ app.put('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
     const itemId = req.params.id;
     const item = await BoxItem.findById(itemId);
     if (!item) throw new Error('Item not found.');
+    if (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' })) {
+      throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
+    }
     Object.assign(item, { heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description') });
     await item.save();
     res.json(await presentConsignment(item.consignment));
@@ -1317,6 +1365,9 @@ app.delete('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) 
 app.delete('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
   const item = await BoxItem.findById(req.params.id);
   if (!item) return res.status(404).json({ error: 'Item not found.' });
+  if (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' })) {
+    return res.status(409).json({ error: 'Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.' });
+  }
   await item.deleteOne();
   res.json(await presentConsignment(item.consignment));
 });

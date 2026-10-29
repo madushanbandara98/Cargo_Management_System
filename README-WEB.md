@@ -14,6 +14,18 @@ migration and is not read by the deployed application.
 5. Start Vite in another terminal with `npm run dev`.
 6. Open the URL printed by Vite (normally `http://localhost:5173`).
 
+## Optional direct label printing
+
+QR labels support optional direct printing through QZ Tray. Customers can
+install QZ Tray on Windows, macOS, or Linux, start it, and then open the QR
+label dialog. The dialog will list printers detected by the operating system.
+Selecting `System printer (browser)` keeps the standard browser print flow for
+customers who do not install QZ Tray.
+
+QZ Tray is loaded from jsDelivr in `public/index.html`. Production deployments
+should configure QZ Tray certificate and request signing before enabling silent
+printing; without signing, QZ Tray may show its normal security prompts.
+
 The default `TRACKING_PROVIDER=manual` enables a complete confirmed/planned journey timeline without external credentials. Set a strong `TRACKING_WEBHOOK_SECRET` before testing the webhook endpoint. The optional `mock` provider is for clearly labeled demonstrations only. Production tracking additionally requires an installed provider adapter and credentials from that provider; unsupported provider names fail closed instead of falling back to simulated data.
 
 Vite proxies `/api` and `/delivery` to the local Express server. Frontend code

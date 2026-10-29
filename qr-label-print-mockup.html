@@ -1,0 +1,105 @@
+<div id="qr-label-mockup" aria-label="Customer shipment QR label printing mockup">
+  <style>
+    #qr-label-mockup { color: light-dark(#171d2a, #f4f6f9); font: 14px/1.45 Inter, system-ui, sans-serif; }
+    #qr-label-mockup * { box-sizing: border-box; }
+    #qr-label-mockup .product-window { overflow: hidden; border-radius: 18px; background: light-dark(#f7f8fb, #182131); box-shadow: 0 22px 55px light-dark(rgba(23,29,42,.2), rgba(0,0,0,.4)); }
+    #qr-label-mockup .topline { height: 8px; background: #f0d405; }
+    #qr-label-mockup .app-shell { display: grid; grid-template-columns: 205px minmax(0, 1fr); min-height: 660px; }
+    #qr-label-mockup .sidebar { display: flex; flex-direction: column; padding: 24px 16px; color: #edf2f7; background: #20283a; }
+    #qr-label-mockup .brand { display: flex; align-items: center; gap: 9px; margin-bottom: 36px; font-weight: 700; letter-spacing: .01em; }
+    #qr-label-mockup .brand-mark { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 9px; color: #20283a; background: #f0d405; font-size: 10px; font-weight: 800; }
+    #qr-label-mockup .side-label { margin: 0 0 9px 10px; color: #95a0b2; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    #qr-label-mockup .side-link { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 9px 10px; border-radius: 8px; color: #bdc7d5; font-size: 13px; }
+    #qr-label-mockup .side-link.active { color: #fff; background: rgba(240,212,5,.14); }
+    #qr-label-mockup .side-link i { width: 16px; height: 16px; color: #f0d405; }
+    #qr-label-mockup .workspace { padding: 34px 38px; }
+    #qr-label-mockup .crumb { margin: 0 0 17px; color: #7d8797; font-size: 12px; }
+    #qr-label-mockup .crumb strong { color: #20283a; font-weight: 650; }
+    #qr-label-mockup .heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+    #qr-label-mockup h1 { margin: 0; color: #171d2a; font-size: 29px; letter-spacing: -.025em; }
+    #qr-label-mockup .heading-row p { margin: 6px 0 0; color: #687086; }
+    #qr-label-mockup .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    #qr-label-mockup button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 11px; border: 1px solid #d5d9e1; border-radius: 8px; color: #303849; background: #fff; font: inherit; font-size: 12px; font-weight: 650; }
+    #qr-label-mockup button i { width: 15px; height: 15px; }
+    #qr-label-mockup .qr-action { border-color: #e0c800; color: #252100; background: #f0d405; box-shadow: 0 7px 15px rgba(190,169,0,.18); }
+    #qr-label-mockup .divider { height: 1px; margin: 28px 0 20px; background: #e4e7ec; }
+    #qr-label-mockup .customer-banner { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; padding: 18px 20px; border: 1px solid #e1e5eb; border-radius: 12px; background: #fff; }
+    #qr-label-mockup .avatar { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #567793; font-size: 14px; font-weight: 750; }
+    #qr-label-mockup .customer-banner h2 { margin: 0; color: #20283a; font-size: 16px; }
+    #qr-label-mockup .customer-banner p { margin: 3px 0 0; color: #687086; font-size: 12px; }
+    #qr-label-mockup .status { padding: 5px 9px; border-radius: 99px; color: #087443; background: #e6f6ed; font-size: 11px; font-weight: 700; }
+    #qr-label-mockup .details { display: grid; grid-template-columns: 1.1fr .9fr; gap: 17px; margin-top: 17px; }
+    #qr-label-mockup .panel { padding: 20px; border: 1px solid #e1e5eb; border-radius: 12px; background: #fff; }
+    #qr-label-mockup .panel h3 { margin: 0 0 15px; color: #20283a; font-size: 14px; }
+    #qr-label-mockup .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    #qr-label-mockup .info-grid small, #qr-label-mockup .shipment-row small { display: block; margin-bottom: 3px; color: #7f8998; font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
+    #qr-label-mockup .info-grid strong, #qr-label-mockup .shipment-row strong { color: #293447; font-size: 13px; }
+    #qr-label-mockup .shipment-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #edf0f3; }
+    #qr-label-mockup .shipment-row:last-child { border-bottom: 0; }
+    #qr-label-mockup .dialog-backdrop { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(12,20,33,.43); }
+    #qr-label-mockup .dialog { width: min(470px, 100%); overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 28px 70px rgba(0,0,0,.3); }
+    #qr-label-mockup .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 22px 23px 17px; border-bottom: 1px solid #e8ebef; }
+    #qr-label-mockup .dialog-title { display: flex; align-items: center; gap: 10px; }
+    #qr-label-mockup .dialog-title span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: #252100; background: #fff4a8; }
+    #qr-label-mockup .dialog-title i { width: 18px; height: 18px; }
+    #qr-label-mockup .dialog h2 { margin: 0; color: #171d2a; font-size: 18px; letter-spacing: -.015em; }
+    #qr-label-mockup .dialog-head p { margin: 3px 0 0; color: #687086; font-size: 12px; }
+    #qr-label-mockup .close { min-height: 28px; padding: 4px; border: 0; color: #687086; background: transparent; }
+    #qr-label-mockup .dialog-body { padding: 19px 23px 22px; }
+    #qr-label-mockup .job-summary { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid #eee4a8; border-radius: 8px; background: #fffdf0; }
+    #qr-label-mockup .job-summary i { width: 17px; height: 17px; color: #9b8400; }
+    #qr-label-mockup .job-summary strong, #qr-label-mockup .job-summary span { display: block; }
+    #qr-label-mockup .job-summary strong { color: #3a3513; font-size: 12px; }.job-summary span { color: #786e31; font-size: 11px; }
+    #qr-label-mockup .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 17px; }
+    #qr-label-mockup label { display: grid; gap: 6px; color: #4f596a; font-size: 11px; font-weight: 700; }
+    #qr-label-mockup select, #qr-label-mockup input { width: 100%; height: 37px; padding: 0 10px; border: 1px solid #d4d8e0; border-radius: 7px; color: #252d3c; background: #fff; font: inherit; font-size: 12px; }
+    #qr-label-mockup .field-wide { grid-column: 1 / -1; }
+    #qr-label-mockup .print-preview { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 12px; margin-top: 17px; padding: 12px; border: 1px solid #e3e7ec; border-radius: 9px; background: #fafbfc; }
+    #qr-label-mockup .qr { width: 65px; height: 65px; display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(7, 1fr); gap: 2px; padding: 4px; background: #fff; }
+    #qr-label-mockup .qr b { background: #17202f; }.qr b:nth-child(2n), .qr b:nth-child(5n) { background: transparent; }.qr b:nth-child(1),.qr b:nth-child(7),.qr b:nth-child(43),.qr b:nth-child(49) { background:#17202f; }
+    #qr-label-mockup .print-preview strong { display: block; color: #273246; font-size: 12px; }.print-preview span { display: block; margin-top: 3px; color: #748092; font-size: 11px; }
+    #qr-label-mockup .dialog-foot { display: flex; align-items: center; justify-content: flex-end; gap: 9px; padding: 16px 23px; border-top: 1px solid #e8ebef; background: #fafbfc; }
+    #qr-label-mockup .dialog-foot button { min-width: 84px; }.dialog-foot .qr-action { min-width: 132px; }
+    #qr-label-mockup .print-result { display: none; padding: 11px 23px; color: #087443; background: #e6f6ed; font-size: 12px; font-weight: 650; }
+    #qr-label-mockup.printed .print-result { display: block; }
+    #qr-label-mockup.printed .dialog-foot .qr-action { background: #d9e0e8; border-color: #d9e0e8; color: #5e6979; }
+    @media (max-width: 680px) { #qr-label-mockup .app-shell { grid-template-columns: 1fr; } #qr-label-mockup .sidebar { display: none; } #qr-label-mockup .workspace { padding: 24px 18px; } #qr-label-mockup .heading-row, #qr-label-mockup .customer-banner { align-items: flex-start; flex-direction: column; } #qr-label-mockup .actions { justify-content: flex-start; } #qr-label-mockup .details { grid-template-columns: 1fr; } }
+  </style>
+  <section class="product-window" aria-label="Customer shipment screen">
+    <div class="topline"></div>
+    <div class="app-shell">
+      <aside class="sidebar"><div class="brand"><span class="brand-mark">CD</span><span>Container Desk</span></div><p class="side-label">Operations</p><div class="side-link"><i data-lucide="ship-wheel" aria-hidden="true"></i>Shipments</div><div class="side-link active"><i data-lucide="users-round" aria-hidden="true"></i>Customers</div><div class="side-link"><i data-lucide="truck" aria-hidden="true"></i>Delivery status</div><p class="side-label" style="margin-top:24px">Administration</p><div class="side-link"><i data-lucide="settings" aria-hidden="true"></i>Settings</div></aside>
+      <main class="workspace"><p class="crumb">Customers <span> / </span><strong>Maria Rodriguez</strong></p><div class="heading-row"><div><h1>Customer shipment</h1><p>Manage customer, consignment, invoice, and box-label details.</p></div><div class="actions"><button type="button"><i data-lucide="pencil" aria-hidden="true"></i>Edit customer</button><button type="button"><i data-lucide="file-text" aria-hidden="true"></i>Invoice</button><button class="qr-action" type="button" id="open-qr"><i data-lucide="qr-code" aria-hidden="true"></i>Print QR</button></div></div><div class="divider"></div><section class="customer-banner"><span class="avatar">MR</span><div><h2>Maria Rodriguez</h2><p>Customer ref. CUS-2026-0041 · maria@example.com</p></div><span class="status">Active consignment</span></section><div class="details"><section class="panel"><h3>Customer details</h3><div class="info-grid"><div><small>Pickup contact</small><strong>Maria Rodriguez</strong></div><div><small>Phone</small><strong>+49 152 987 4102</strong></div><div><small>Origin</small><strong>Hamburg, Germany</strong></div><div><small>Destination</small><strong>Colombo, Sri Lanka</strong></div></div></section><section class="panel"><h3>Consignment</h3><div class="shipment-row"><span><small>Shipment</small><strong>July 2026 Germany–Sri Lanka</strong></span><span class="status">In transit</span></div><div class="shipment-row"><span><small>Items</small><strong>12 boxes</strong></span><span><small>Reference</small><strong>JUL-2026-01</strong></span></div></section></div></main>
+    </div>
+    <div class="dialog-backdrop" id="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-heading">
+      <section class="dialog"><div class="dialog-head"><div class="dialog-title"><span><i data-lucide="qr-code" aria-hidden="true"></i></span><div><h2 id="dialog-heading">Print box labels</h2><p>Create individual QR stickers for this consignment.</p></div></div><button class="close" type="button" id="close-qr" aria-label="Close print label dialog"><i data-lucide="x" aria-hidden="true"></i></button></div><div class="print-result" aria-live="polite">Print job sent: 12 box labels are queued on TSC DA210.</div><div class="dialog-body"><div class="job-summary"><i data-lucide="package-check" aria-hidden="true"></i><div><strong>Maria Rodriguez · JUL-2026-01</strong><span>12 individual labels will be created, numbered 01–12.</span></div></div><div class="fields"><label class="field-wide">Printer<select><option>TSC DA210 · USB</option><option>TSC DA210 · Bluetooth</option><option>System printer (PDF)</option></select></label><label>Label size<select><option>100 × 150 mm (4 × 6 in)</option><option>100 × 100 mm (4 × 4 in)</option></select></label><label>Print labels<select><option>All boxes (01–12)</option><option>Selected range</option><option>One box only</option></select></label><label>Start from<input value="1" inputmode="numeric" aria-label="Start box number"></label><label>Quantity<input value="12" inputmode="numeric" aria-label="Number of labels"></label></div><div class="print-preview"><div class="qr" aria-label="QR code preview"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div><div><strong>Label preview: Box 01 of 12</strong><span>QR code · Customer reference · Shipment reference · Box sequence</span></div></div></div><div class="dialog-foot"><button type="button" id="cancel-qr">Cancel</button><button class="qr-action" type="button" id="print-qr"><i data-lucide="printer" aria-hidden="true"></i>Print 12 labels</button></div></section>
+    </div>
+  </section>
+  <style>
+    #qr-label-mockup .print-preview { grid-template-columns: 116px 1fr; min-height: 118px; padding: 10px; border-color: #cfd6df; background: #fff; }
+    #qr-label-mockup .print-preview .qr { width: 96px; height: 96px; gap: 2px; }
+    #qr-label-mockup .print-preview .sticker-copy { padding-left: 3px; }
+    #qr-label-mockup .print-preview .sticker-copy strong { margin-bottom: 10px; font-size: 13px; }
+    #qr-label-mockup .print-preview .sticker-copy span { margin: 5px 0 0; color: #687086; font-size: 11px; line-height: 1.45; }
+    #qr-label-mockup .print-preview .sticker-copy .sticker-title { color: #20283a; font-size: 15px; font-weight: 800; }
+    #qr-label-mockup .print-preview .sticker-copy .sticker-box { display: inline-block; margin-top: 9px; padding: 4px 7px; border-radius: 5px; color: #252100; background: #f0d405; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+  </style>
+  <script>
+    const stickerCopy = document.querySelector('.print-preview > div:last-child');
+    stickerCopy.className = 'sticker-copy';
+    stickerCopy.innerHTML = '<strong class="sticker-title">Box label preview</strong><span>Maria Rodriguez</span><span>JUL-2026-01 · Germany → Sri Lanka</span><span class="sticker-box">BOX 01 / 12</span>';
+    const mockup = document.getElementById('qr-label-mockup');
+    const dialog = document.getElementById('qr-dialog');
+    document.getElementById('open-qr').addEventListener('click', () => { dialog.style.display = 'grid'; });
+    document.getElementById('close-qr').addEventListener('click', () => { dialog.style.display = 'none'; });
+    document.getElementById('cancel-qr').addEventListener('click', () => { dialog.style.display = 'none'; });
+    document.getElementById('print-qr').addEventListener('click', () => { mockup.classList.add('printed'); });
+    if (globalThis.Tweak) {
+      const state = { label_size: '100 × 150 mm', dialog_visible: true };
+      const render = () => { dialog.style.display = state.dialog_visible ? 'grid' : 'none'; };
+      const tweak = new Tweak({ container: mockup, onChange: render });
+      tweak.addSelect(state, 'label_size', { label: 'Preferred label size', options: ['100 × 150 mm', '100 × 100 mm'] });
+      tweak.addToggle(state, 'dialog_visible', { label: 'Show print dialog' });
+    }
+  </script>
+</div>

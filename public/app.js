@@ -9,6 +9,29 @@ let trackingRecords = [];
 let trackingStatusRefreshTimer = null;
 let deliveryStatusRefreshTimer = null;
 
+async function connectPrintAgent() {
+  const qz = window.qz;
+  if (!qz?.websocket) throw new Error('QZ Tray is not installed or available.');
+  if (!qz.websocket.isActive()) await qz.websocket.connect();
+  return qz;
+}
+
+async function getLocalPrinters() {
+  const qz = await connectPrintAgent();
+  const printers = await qz.printers.find();
+  return { qz, printers: Array.isArray(printers) ? printers : [printers].filter(Boolean) };
+}
+
+function qrLabelHtml(labels, width, height) {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${width}mm ${height}mm;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}.qr-box-label{width:${width}mm;height:${height}mm;display:flex;align-items:center;flex-direction:column;padding:12mm 8mm 8mm;text-align:center;page-break-after:always}.qr-box-label img{width:58mm;height:58mm;object-fit:contain}.qr-box-label strong{margin-top:7mm;font-size:19pt}.qr-box-label span{margin-top:3mm;font-size:11pt}.qr-box-label b{margin-top:6mm;font-size:16pt;letter-spacing:.08em}</style></head><body>${labels}</body></html>`;
+}
+
+async function printQrLabelsWithAgent(printer, labels, width, height) {
+  const qz = await connectPrintAgent();
+  const config = qz.configs.create(printer, { size: { width, height, units: 'mm' }, margins: 0, scaleContent: false });
+  await qz.print(config, [{ type: 'pixel', format: 'html', flavor: 'plain', data: qrLabelHtml(labels, width, height) }]);
+}
+
 const carrierTrackingUrls = {
   Maersk: 'https://www.maersk.com/tracking/',
   MSC: 'https://www.msc.com/track-a-shipment',
@@ -23,7 +46,10 @@ const carrierTrackingUrls = {
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
   if (response.status === 204) return null;
-  const body = await response.json();
+  const contentType = response.headers.get('content-type') || '';
+  const body = contentType.includes('application/json')
+    ? await response.json().catch(() => ({ error: `The server returned an invalid response (${response.status}).` }))
+    : { error: (await response.text()).trim() || `The server returned an empty response (${response.status}).` };
   if (!response.ok) throw new Error(body.error || 'Request failed.');
   return body;
 }
@@ -1216,14 +1242,105 @@ function renderDocumentActions(consignment = null) {
   const emailHistory = consignment?.latest_invoice?.email_history || [];
   const lastEmail = emailHistory[emailHistory.length - 1];
   const canSend = Boolean(consignment?.billing_email);
-  invoiceActions.innerHTML = `<div class="document-buttons"><button type="button" id="preview-invoice" class="secondary" ${consignment ? '' : 'disabled'}>Preview invoice</button><button type="button" id="download-packing-list" class="secondary" ${consignment ? '' : 'disabled'}>Download packing list</button><button type="button" id="issue-invoice" ${consignment ? '' : 'disabled'}>Print invoice</button><button type="button" id="send-invoice" ${canSend ? '' : 'disabled'} title="${!consignment ? 'Save or load a customer first.' : !consignment.billing_email ? 'Add and save a billing email before sending.' : ''}">${lastEmail ? 'Resend Invoice' : 'Send Invoice'}</button></div>${lastEmail ? `<div class="invoice-email-status">✓ Sent to <span>${escapeHtml(lastEmail.recipient)}</span></div>` : ''}`;
-  if (!document.querySelector('#invoice-email-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="invoice-email-styles">.shipment-page .page-action-bar .invoice-actions{width:min(100%,1180px)!important;display:block!important}.document-buttons{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;width:100%}.document-buttons button{width:100%;min-width:0!important}.invoice-email-status{display:flex;align-items:center;justify-content:center;gap:.3rem;width:100%;margin-top:.8rem;padding:.65rem .8rem;border:1px solid #a9dec8;border-radius:8px;color:#087443;background:#f1fbf6;font-size:.8rem;font-weight:700;overflow-wrap:anywhere}.invoice-email-dialog{width:min(560px,calc(100% - 2rem))}.invoice-email-summary{padding:.85rem;border:1px solid #e3e7ed;border-radius:9px;background:#f7f8fa}.invoice-email-summary span,.invoice-email-summary strong{display:block}.invoice-email-summary span{color:#697386;font-size:.76rem}.invoice-email-summary strong{margin-top:.2rem}.invoice-email-dialog textarea{width:100%;min-height:130px;resize:vertical;border:1px solid #cbd1dc;border-radius:7px;padding:.75rem;font:inherit;line-height:1.5}@media(max-width:850px){.document-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.document-buttons{grid-template-columns:1fr}.invoice-email-status{align-items:flex-start;flex-direction:column}}</style>');
+  invoiceActions.innerHTML = `<div class="document-buttons"><button type="button" id="preview-invoice" class="secondary" ${consignment ? '' : 'disabled'}>Preview invoice</button><button type="button" id="download-packing-list" class="secondary" ${consignment ? '' : 'disabled'}>Download packing list</button><button type="button" id="issue-invoice" ${consignment ? '' : 'disabled'}>Print invoice</button><button type="button" id="send-invoice" ${canSend ? '' : 'disabled'} title="${!consignment ? 'Save or load a customer first.' : !consignment.billing_email ? 'Add and save a billing email before sending.' : ''}">${lastEmail ? 'Resend Invoice' : 'Send Invoice'}</button><button type="button" id="print-qr-labels" class="qr-label-action" ${consignment?.total_items ? '' : 'disabled'} title="${consignment?.total_items ? 'Print one QR label for each box.' : 'Add delivery items before printing labels.'}">Print QR</button></div>${lastEmail ? `<div class="invoice-email-status">✓ Sent to <span>${escapeHtml(lastEmail.recipient)}</span></div>` : ''}`;
+  if (!document.querySelector('#invoice-email-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="invoice-email-styles">.shipment-page .page-action-bar .invoice-actions{width:min(100%,1180px)!important;display:block!important}.document-buttons{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.65rem;width:100%}.document-buttons button{width:100%;min-width:0!important}.document-buttons .qr-label-action{color:#fff;background:#20283a}.document-buttons .qr-label-action:hover{background:#303b51}.invoice-email-status{display:flex;align-items:center;justify-content:center;gap:.3rem;width:100%;margin-top:.8rem;padding:.65rem .8rem;border:1px solid #a9dec8;border-radius:8px;color:#087443;background:#f1fbf6;font-size:.8rem;font-weight:700;overflow-wrap:anywhere}.invoice-email-dialog,.qr-label-dialog{width:min(560px,calc(100% - 2rem))}.invoice-email-summary,.qr-label-summary{padding:.85rem;border:1px solid #e3e7ed;border-radius:9px;background:#f7f8fa}.invoice-email-summary span,.invoice-email-summary strong,.qr-label-summary span,.qr-label-summary strong{display:block}.invoice-email-summary span,.qr-label-summary span{color:#697386;font-size:.76rem}.invoice-email-summary strong,.qr-label-summary strong{margin-top:.2rem}.invoice-email-dialog textarea{width:100%;min-height:130px;resize:vertical;border:1px solid #cbd1dc;border-radius:7px;padding:.75rem;font:inherit;line-height:1.5}.qr-label-dialog form{gap:1rem}.qr-label-dialog .qr-label-fields{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}.qr-label-dialog .qr-label-fields label{font-size:.82rem}.qr-label-dialog .qr-label-fields label:last-child{grid-column:1/-1}.qr-custom-size-fields{display:none;grid-column:1/-1;grid-template-columns:1fr 1fr;gap:.8rem}.qr-custom-size-fields.is-visible{display:grid}.qr-label-preview{display:flex;align-items:center;gap:1rem;padding:.8rem;border:1px solid #e3e7ed;border-radius:9px;background:#fff}.qr-label-preview img{width:76px;height:76px;object-fit:contain}.qr-label-preview strong,.qr-label-preview span{display:block}.qr-label-preview span{margin-top:.25rem;color:#697386;font-size:.78rem}.qr-label-loading{color:#697386;font-size:.82rem}@media(max-width:850px){.document-buttons{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:600px){.document-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}.qr-label-dialog .qr-label-fields{grid-template-columns:1fr}.qr-custom-size-fields{grid-template-columns:1fr}.qr-label-dialog .qr-label-fields label:last-child{grid-column:auto}}@media(max-width:480px){.document-buttons{grid-template-columns:1fr}.invoice-email-status{align-items:flex-start;flex-direction:column}}</style>');
   pageActionBar.append(invoiceActions);
   if (!consignment) return;
   invoiceActions.querySelector('#preview-invoice').onclick = () => openInvoice(consignment, false, document.querySelector('#item-editor'));
   invoiceActions.querySelector('#download-packing-list').onclick = () => window.open(`/api/consignments/${consignment.id}/packing-list`, '_blank');
   invoiceActions.querySelector('#issue-invoice').onclick = () => printIssuedInvoice(consignment, document.querySelector('#item-editor'));
   invoiceActions.querySelector('#send-invoice').onclick = () => showSendInvoiceDialog(consignment);
+  invoiceActions.querySelector('#print-qr-labels').onclick = () => showQrLabelDialog(consignment);
+}
+
+async function loadQrLabelData(consignment) {
+  if (!consignment.latest_invoice) {
+    const issued = await api(`/api/consignments/${consignment.id}/invoices`, { method: 'POST', body: '{}' });
+    consignment.latest_invoice = { id: issued.id, invoice_number: issued.invoiceNumber, status: 'ISSUED', email_history: [] };
+  }
+  return api(`/api/invoices/${consignment.latest_invoice.id}/qr-label`);
+}
+
+function showQrLabelDialog(consignment) {
+  const totalItems = Number(consignment.total_items || 0);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'confirm-dialog qr-label-dialog';
+  dialog.innerHTML = `<form method="dialog"><h2>Print QR labels</h2><p>Create one individual sticker for each box in this consignment.</p><div class="qr-label-summary"><span>Customer and shipment</span><strong>${escapeHtml(consignment.customer_ref)} · ${escapeHtml(consignment.shipment_reference || consignment.shipment_name || 'Shipment')}</strong><span>${totalItems} labels will be numbered 01–${String(totalItems).padStart(2, '0')}.</span></div><div class="qr-label-fields"><label>Printer<select name="printer" data-printer-select><option value="system">System printer (browser)</option></select></label><label>Label size<select name="labelSize"><option value="100x150">100 × 150 mm (4 × 6 in)</option><option value="100x100">100 × 100 mm (4 × 4 in)</option><option value="custom">Custom size</option></select></label><label>Print labels<select name="printMode"><option value="all">All boxes (01–${String(totalItems).padStart(2, '0')})</option><option value="one">One box only</option></select></label><label>Start from<input name="start" type="number" min="1" max="${totalItems}" value="1" required></label><label>Quantity<input name="quantity" type="number" min="1" max="${totalItems}" value="${totalItems}" required></label><div class="qr-custom-size-fields" aria-live="polite"><label>Width (mm)<input name="customWidth" type="number" min="20" max="300" step="0.1" value="100" disabled required></label><label>Height (mm)<input name="customHeight" type="number" min="20" max="300" step="0.1" value="150" disabled required></label></div></div><p class="printer-agent-status" role="status">Browser printing is selected. Use your print dialog to print or save a PDF.</p><div class="qr-label-preview"><span class="qr-label-loading">Loading label preview…</span></div><div class="confirm-dialog-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button type="submit" class="qr-label-action" disabled>Print / Save PDF</button></div></form>`;
+  document.body.append(dialog);
+  const form = dialog.querySelector('form');
+  const printButton = form.querySelector('button[type="submit"]');
+  const preview = form.querySelector('.qr-label-preview');
+  const printerSelect = form.querySelector('[data-printer-select]');
+  const printerStatus = form.querySelector('.printer-agent-status');
+  const updatePrintButton = () => { printButton.textContent = printerSelect.value === 'system' ? `Print ${totalItems} labels / Save PDF` : `Print ${totalItems} labels`; };
+  const labelSizeSelect = form.querySelector('[name="labelSize"]');
+  const customSizeFields = form.querySelector('.qr-custom-size-fields');
+  const customSizeInputs = [...customSizeFields.querySelectorAll('input')];
+  let qrDataUrl = null;
+  printerSelect.addEventListener('change', updatePrintButton);
+  updatePrintButton();
+  const updateCustomSizeVisibility = () => {
+    const custom = labelSizeSelect.value === 'custom';
+    customSizeFields.classList.toggle('is-visible', custom);
+    customSizeInputs.forEach(input => { input.disabled = !custom; });
+  };
+  labelSizeSelect.addEventListener('change', updateCustomSizeVisibility);
+  updateCustomSizeVisibility();
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
+  getLocalPrinters().then(({ printers }) => {
+    printerSelect.innerHTML = '<option value="system">System printer (browser)</option>' + printers.map(printer => `<option value="${escapeHtml(printer)}">${escapeHtml(printer)} · direct</option>`).join('');
+    printerStatus.textContent = printers.length ? `${printers.length} printer${printers.length === 1 ? '' : 's'} detected through QZ Tray.` : 'QZ Tray is connected, but no printers were found.';
+  }).catch(() => {
+    printerStatus.textContent = 'QZ Tray not detected. Browser printing is available.';
+  });
+  loadQrLabelData(consignment).then(data => {
+    if (typeof data.qrDataUrl !== 'string' || !data.qrDataUrl.startsWith('data:image/')) throw new Error('The server returned an invalid QR image.');
+    qrDataUrl = data.qrDataUrl;
+    const image = document.createElement('img');
+    image.alt = 'QR label preview';
+    image.src = qrDataUrl;
+    const description = document.createElement('span');
+    description.innerHTML = `<strong>Box 01 of ${totalItems}</strong><span>Customer reference, shipment reference, and box sequence will be printed.</span>`;
+    preview.replaceChildren(image, description);
+    printButton.disabled = false;
+    updatePrintButton();
+  }).catch(error => { preview.replaceChildren(Object.assign(document.createElement('span'), { className: 'error', textContent: error.message })); });
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (!qrDataUrl) return;
+    const values = Object.fromEntries(new FormData(form));
+    const start = Math.max(1, Number(values.start));
+    const quantity = values.printMode === 'one' ? 1 : Math.min(totalItems, Number(values.quantity));
+    if (!Number.isInteger(start) || !Number.isInteger(quantity) || start + quantity - 1 > totalItems) return message(form, `Choose a valid range between 1 and ${totalItems}.`);
+    const customWidth = Number(values.customWidth);
+    const customHeight = Number(values.customHeight);
+    if (values.labelSize === 'custom' && (!Number.isFinite(customWidth) || !Number.isFinite(customHeight) || customWidth < 20 || customWidth > 300 || customHeight < 20 || customHeight > 300)) return message(form, 'Enter a custom width and height between 20 mm and 300 mm.');
+    try {
+      await printQrLabels(consignment, qrDataUrl, start, quantity, totalItems, values.labelSize, customWidth, customHeight, values.printer);
+      dialog.close();
+    } catch (error) {
+      message(form, error.message || 'The labels could not be printed.');
+    }
+  };
+}
+
+async function printQrLabels(consignment, qrDataUrl, start, quantity, totalItems, labelSize = '100x150', customWidth, customHeight, printer = 'system') {
+  const labels = Array.from({ length: quantity }, (_, index) => { const number = start + index; return `<article class="qr-box-label"><img src="${qrDataUrl}" alt="QR code"><strong>${escapeHtml(consignment.customer_ref || 'Customer')}</strong><span>${escapeHtml(consignment.shipment_reference || consignment.shipment_name || 'Shipment')}</span><b>BOX ${String(number).padStart(2, '0')} / ${String(totalItems).padStart(2, '0')}</b></article>`; }).join('');
+  const width = labelSize === 'custom' ? customWidth : 100;
+  const height = labelSize === '100x100' ? 100 : labelSize === 'custom' ? customHeight : 150;
+  if (printer !== 'system') {
+    await printQrLabelsWithAgent(printer, labels, width, height);
+    showToast(`Sent ${quantity} label${quantity === 1 ? '' : 's'} to ${printer}.`);
+    return;
+  }
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return showToast('Allow pop-ups to print QR labels.', 'error');
+  const dimensions = `${width}mm ${height}mm`;
+  printWindow.document.write(`<!doctype html><html><head><title>QR labels · ${escapeHtml(consignment.customer_ref)}</title><style>@page{size:${dimensions};margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;font-family:Arial,sans-serif}.qr-box-label{width:${width}mm;height:${height}mm;display:flex;align-items:center;flex-direction:column;padding:12mm 8mm 8mm;border-bottom:1px dashed #bbb;text-align:center;page-break-after:always}.qr-box-label img{width:58mm;height:58mm;object-fit:contain}.qr-box-label strong{margin-top:7mm;font-size:19pt}.qr-box-label span{margin-top:3mm;font-size:11pt}.qr-box-label b{margin-top:6mm;font-size:16pt;letter-spacing:.08em}@media print{.qr-box-label{border:0}}</style></head><body>${labels}</body></html>`);
+  printWindow.document.close();
+  printWindow.onload = () => printWindow.print();
 }
 
 function showSendInvoiceDialog(consignment) {
@@ -1421,21 +1538,11 @@ function renderInvoiceWindow(target, snapshot, invoiceNumber, printAfterLoad, qr
   const registration = [snapshot.business.registrationNumber && `Registration: ${escapeHtml(snapshot.business.registrationNumber)}`, snapshot.business.vatNumber && `VAT: ${escapeHtml(snapshot.business.vatNumber)}`].filter(Boolean).join(' &nbsp;•&nbsp; ');
   const bankDetails = [snapshot.business.bankName && `<p><span>Bank</span>${escapeHtml(snapshot.business.bankName)}</p>`, snapshot.business.accountHolder && `<p><span>Account holder</span>${escapeHtml(snapshot.business.accountHolder)}</p>`, snapshot.business.iban && `<p><span>IBAN</span>${escapeHtml(snapshot.business.iban)}</p>`, snapshot.business.bic && `<p><span>BIC / SWIFT</span>${escapeHtml(snapshot.business.bic)}</p>`].filter(Boolean).join('') || '<p>Payment details are available from the business.</p>';
   target.document.open();
-  const qrSection = qrDataUrl ? `<div class="qr"><img src="${qrDataUrl}" alt="Invoice QR code"><span>Scan to view invoice</span></div>` : '<div class="preview-note">Draft preview</div>';
-  const totalLabels = snapshot.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const labelPages = qrDataUrl ? Array.from({ length: Math.ceil(totalLabels / 9) }, (_, pageIndex) => {
-    const firstLabel = pageIndex * 9;
-    const labels = Array.from({ length: Math.min(9, totalLabels - firstLabel) }, (_, labelIndex) => {
-      const itemNumber = firstLabel + labelIndex + 1;
-      return `<article class="qr-label"><strong class="qr-label-brand">${escapeHtml(snapshot.business.name)}</strong><img src="${qrDataUrl}" alt="QR code for customer ${escapeHtml(snapshot.customer.reference)} item ${itemNumber}"><strong class="qr-label-reference">${escapeHtml(snapshot.customer.reference)}</strong><strong class="qr-label-number">ITEM ${String(itemNumber).padStart(2, '0')}/${String(totalLabels).padStart(2, '0')}</strong></article>`;
-    }).join('');
-    return `<section class="qr-label-sheet" aria-label="QR labels ${firstLabel + 1} to ${Math.min(firstLabel + 9, totalLabels)}">${labels}</section>`;
-  }).join('') : '';
   target.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(invoiceNumber)}</title><style>
   .customer-reference{margin-top:18px;padding:11px 13px;border:1px solid #dce2e8;border-left:5px solid ${accent};border-radius:7px;background:#f7f9fa}.customer-reference small,.customer-reference strong{display:block}.customer-reference small{margin-bottom:4px;color:#778395;font-size:8px;font-weight:900;letter-spacing:.08em}.customer-reference strong{color:${accentText};font-size:22px}
   @page{size:A4;margin:10mm}*{box-sizing:border-box}body{margin:0;color:#182536;background:#eef1f4;font:11px Arial,sans-serif}.invoice{width:190mm;min-height:277mm;margin:18px auto;padding:12mm;background:#fff;box-shadow:0 5px 25px #1724381c}.header{display:grid;grid-template-columns:1.4fr .8fr;gap:22px;padding-bottom:18px;border-bottom:1px solid #d9e0e6}.brand-wrap{display:flex;gap:13px;align-items:flex-start}.business-logo,.logo-fallback{width:64px;height:64px;flex:0 0 64px;object-fit:contain}.logo-fallback{display:grid;place-items:center;color:${accentForeground};background:${accent};font-weight:900;clip-path:polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%)}.business-name{margin:2px 0 3px;color:${accentText};font-size:21px;font-weight:900;letter-spacing:.02em;text-transform:uppercase}.tagline{margin-bottom:7px;color:#536174;font-size:10px}.contact{color:#536174;font-size:9px;line-height:1.55}.invoice-title{text-align:right}.invoice-title h1{margin:0;color:${accentText};font-size:34px;letter-spacing:.07em}.invoice-meta{display:grid;grid-template-columns:auto auto;gap:5px 13px;justify-content:end;margin-top:9px;line-height:1.4}.invoice-meta span:nth-child(odd){color:#758092}.status{display:inline-block;margin-top:10px;padding:5px 11px;border:1px solid ${snapshot.paymentStatus === 'PAID' ? '#66b991' : snapshot.paymentStatus === 'PARTIALLY_PAID' ? '#8fb8df' : '#d5aa57'};border-radius:6px;color:${snapshot.paymentStatus === 'PAID' ? '#087443' : snapshot.paymentStatus === 'PARTIALLY_PAID' ? '#2865a1' : '#9b5900'};font-size:9px;font-weight:900}.parties{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin:18px 0 12px}.party{min-height:104px;padding:12px;border:1px solid #dce2e8;border-radius:7px}.eyebrow{margin:0 0 8px;color:#087d86;font-size:9px;font-weight:900;letter-spacing:.08em}.party h2{margin:0 0 6px;font-size:14px}.party p{margin:3px 0;color:#4f5d70;line-height:1.35}.shipment-strip{display:grid;grid-template-columns:1.25fr 1fr .7fr .9fr;margin-bottom:15px;border:1px solid #dce2e8;border-radius:7px;background:#f7f9fa}.shipment-strip div{padding:9px 11px;border-right:1px solid #dce2e8}.shipment-strip div:last-child{border:0}.shipment-strip small,.shipment-strip strong{display:block}.shipment-strip small{margin-bottom:3px;color:#778395;font-size:8px;text-transform:uppercase}.items{width:100%;border-collapse:collapse}.items th{padding:8px 6px;color:${accentForeground};background:${accent};font-size:8px;text-align:left;text-transform:uppercase}.items td{padding:8px 6px;border-bottom:1px solid #e1e6eb}.items tbody tr:nth-child(even){background:#f7f9fa}.items th:nth-child(n+3),.items td:nth-child(n+3){text-align:right}.bottom{display:grid;grid-template-columns:1fr .92fr;gap:22px;margin-top:18px}.bottom h3{margin:0 0 7px;color:#087d86;font-size:10px;letter-spacing:.07em}.notes p,.bank p{margin:4px 0;color:#526074;line-height:1.45}.bank{margin-top:15px}.bank p span{display:inline-block;width:86px;color:#758092}.summary{overflow:hidden;border:1px solid #d8dfe6;border-radius:7px}.summary div{display:flex;justify-content:space-between;padding:8px 11px;border-bottom:1px solid #e1e6eb}.summary .balance{padding:11px;color:${accentForeground};border:0;background:${accent};font-size:15px}.qr{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px;color:#536174;font-size:9px}.qr img{width:65px;height:65px}.preview-note{margin-top:12px;color:#8490a0;text-align:right}.footer{display:flex;justify-content:space-between;gap:15px;margin-top:22px;padding-top:9px;border-top:1px solid #dce2e8;color:#697688;font-size:8px}.footer span:last-child{text-align:right}@media print{html,body,.invoice,.invoice *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{background:#fff}.invoice{width:auto;min-height:auto;margin:0;padding:0;box-shadow:none}}@media(max-width:760px){.invoice{width:100%;min-height:100vh;margin:0;padding:20px}.header,.parties,.bottom{grid-template-columns:1fr}.invoice-title{text-align:left}.invoice-meta{justify-content:start}.shipment-strip{grid-template-columns:1fr 1fr}.items{font-size:9px}}
   .qr-label-sheet{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:4mm;width:190mm;min-height:277mm;margin:18px auto;padding:5mm;background:#fff;box-shadow:0 5px 25px #1724381c}.qr-label{display:flex;min-width:0;align-items:center;justify-content:center;flex-direction:column;padding:5mm 4mm;border:1px solid #d6d6d6;border-radius:3mm;text-align:center;break-inside:avoid}.qr-label-brand{margin-bottom:4mm;color:#111;font-size:11px;letter-spacing:.02em;text-transform:uppercase}.qr-label img{width:34mm;height:34mm;object-fit:contain}.qr-label-reference{margin-top:3mm;color:#050505;font-size:24px;line-height:1}.qr-label-number{margin-top:3mm;color:#111;font-size:13px;line-height:1}@media print{.qr-label-sheet,.qr-label-sheet *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.qr-label-sheet{break-before:page;page-break-before:always;margin:0;box-shadow:none}}
-  </style></head><body><main class="invoice"><header class="header"><div class="brand-wrap">${logo}<div><div class="business-name">${escapeHtml(snapshot.business.name)}</div><div class="tagline">${escapeHtml(snapshot.business.tagline)}</div><div class="contact">${businessContacts}<br>${[snapshot.business.germanAddress, snapshot.business.sriLankanAddress].filter(Boolean).map(escapeHtml).join(' &nbsp;•&nbsp; ')}${registration ? `<br>${registration}` : ''}</div></div></div><div class="invoice-title"><h1>INVOICE</h1><div class="invoice-meta"><span>Invoice No.</span><strong>${escapeHtml(invoiceNumber)}</strong><span>Issue Date</span><strong>${date(snapshot.issuedDate)}</strong><span>Due Date</span><strong>${date(snapshot.dueDate)}</strong></div><span class="status">${statusLabel}</span></div></header><section class="parties"><div class="party"><p class="eyebrow">BILL TO</p><h2>${escapeHtml(pickup.name)}</h2><p>${address(pickup.address)}</p><p>${escapeHtml(snapshot.customer.phoneGermany || '')}</p></div><div class="party"><p class="eyebrow">SHIP TO</p><h2>${escapeHtml(delivery.name)}</h2><p>${address(delivery.address)}</p><p>${escapeHtml(snapshot.customer.phoneSriLanka || '')}</p></div></section><section class="shipment-strip"><div><small>Route</small><strong>Germany → Sri Lanka</strong></div><div><small>Shipment</small><strong>${escapeHtml(snapshot.shipment.name)}</strong></div><div><small>Currency</small><strong>${escapeHtml(snapshot.currency)}</strong></div><div><small>Prepared By</small><strong>${escapeHtml(snapshot.business.contactName)}</strong></div></section><table class="items"><thead><tr><th>#</th><th>Description</th><th>Dimensions (cm)</th><th>Qty</th><th>Volume (m³)</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines}</tbody></table><section class="bottom"><div><div class="notes"><h3>NOTES</h3><p>Thank you for choosing ${escapeHtml(snapshot.business.name)}. Please quote invoice <strong>${escapeHtml(invoiceNumber)}</strong> with your payment.</p><p>Payment terms: ${escapeHtml(snapshot.paymentTerms)}.</p></div><div class="bank"><h3>PAYMENT DETAILS</h3>${bankDetails}</div></div><div><section class="summary"><div><span>Subtotal</span><strong>${money(snapshot.itemsTotal)}</strong></div><div><span>Delivery charge</span><strong>${money(snapshot.deliveryCharge)}</strong></div><div><span>Discount</span><strong>−${money(snapshot.discount || 0)}</strong></div><div><span>Tax</span><strong>${money(0)}</strong></div><div><span>Total</span><strong>${money(snapshot.finalTotal)}</strong></div><div><span>Amount paid</span><strong>${money(snapshot.amountPaid || 0)}</strong></div><div class="balance"><span>BALANCE DUE</span><strong>${money(snapshot.balanceDue ?? snapshot.finalTotal)}</strong></div></section>${qrSection}</div></section><footer class="footer"><span>${escapeHtml(snapshot.business.name)}${businessContacts ? ` &nbsp;•&nbsp; ${businessContacts}` : ''}</span><span>Page 1 of 1</span></footer></main>${labelPages}${printAfterLoad ? '<script>window.onload=()=>window.print()</script>' : ''}</body></html>`);
+  </style></head><body><main class="invoice"><header class="header"><div class="brand-wrap">${logo}<div><div class="business-name">${escapeHtml(snapshot.business.name)}</div><div class="tagline">${escapeHtml(snapshot.business.tagline)}</div><div class="contact">${businessContacts}<br>${[snapshot.business.germanAddress, snapshot.business.sriLankanAddress].filter(Boolean).map(escapeHtml).join(' &nbsp;•&nbsp; ')}${registration ? `<br>${registration}` : ''}</div></div></div><div class="invoice-title"><h1>INVOICE</h1><div class="invoice-meta"><span>Invoice No.</span><strong>${escapeHtml(invoiceNumber)}</strong><span>Issue Date</span><strong>${date(snapshot.issuedDate)}</strong><span>Due Date</span><strong>${date(snapshot.dueDate)}</strong></div><span class="status">${statusLabel}</span></div></header><section class="parties"><div class="party"><p class="eyebrow">BILL TO</p><h2>${escapeHtml(pickup.name)}</h2><p>${address(pickup.address)}</p><p>${escapeHtml(snapshot.customer.phoneGermany || '')}</p></div><div class="party"><p class="eyebrow">SHIP TO</p><h2>${escapeHtml(delivery.name)}</h2><p>${address(delivery.address)}</p><p>${escapeHtml(snapshot.customer.phoneSriLanka || '')}</p></div></section><section class="shipment-strip"><div><small>Route</small><strong>Germany → Sri Lanka</strong></div><div><small>Shipment</small><strong>${escapeHtml(snapshot.shipment.name)}</strong></div><div><small>Currency</small><strong>${escapeHtml(snapshot.currency)}</strong></div><div><small>Prepared By</small><strong>${escapeHtml(snapshot.business.contactName)}</strong></div></section><table class="items"><thead><tr><th>#</th><th>Description</th><th>Dimensions (cm)</th><th>Qty</th><th>Volume (m³)</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines}</tbody></table><section class="bottom"><div><div class="notes"><h3>NOTES</h3><p>Thank you for choosing ${escapeHtml(snapshot.business.name)}. Please quote invoice <strong>${escapeHtml(invoiceNumber)}</strong> with your payment.</p><p>Payment terms: ${escapeHtml(snapshot.paymentTerms)}.</p></div><div class="bank"><h3>PAYMENT DETAILS</h3>${bankDetails}</div></div><div><section class="summary"><div><span>Subtotal</span><strong>${money(snapshot.itemsTotal)}</strong></div><div><span>Delivery charge</span><strong>${money(snapshot.deliveryCharge)}</strong></div><div><span>Discount</span><strong>−${money(snapshot.discount || 0)}</strong></div><div><span>Tax</span><strong>${money(0)}</strong></div><div><span>Total</span><strong>${money(snapshot.finalTotal)}</strong></div><div><span>Amount paid</span><strong>${money(snapshot.amountPaid || 0)}</strong></div><div class="balance"><span>BALANCE DUE</span><strong>${money(snapshot.balanceDue ?? snapshot.finalTotal)}</strong></div></section></div></section><footer class="footer"><span>${escapeHtml(snapshot.business.name)}${businessContacts ? ` &nbsp;•&nbsp; ${businessContacts}` : ''}</span><span>Page 1 of 1</span></footer></main>${printAfterLoad ? '<script>window.onload=()=>window.print()</script>' : ''}</body></html>`);
   target.document.close();
   const referenceBox = target.document.createElement('section');
   referenceBox.className = 'customer-reference';
@@ -1446,5 +1553,18 @@ function renderInvoiceWindow(target, snapshot, invoiceNumber, printAfterLoad, qr
   target.document.querySelector('.party h2').after(customerId);
 }
 
-window.addEventListener('popstate', () => dashboard());
-dashboard();
+function landing() {
+  window.clearInterval(trackingStatusRefreshTimer);
+  window.clearInterval(deliveryStatusRefreshTimer);
+  app.replaceChildren();
+  document.title = 'Container Desk · Cargo operations';
+  window.renderLanding({ onSignIn: () => { window.location.hash = 'login'; } });
+}
+
+window.addEventListener('hashchange', () => {
+  if (window.location.hash === '#login') login();
+  else landing();
+});
+
+if (window.location.hash === '#login') login();
+else landing();
