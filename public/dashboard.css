@@ -27,6 +27,17 @@
   border-right: 1px solid #2b3445;
 }
 
+.sidebar-top {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #56627a transparent;
+}
+
+.sidebar-top::-webkit-scrollbar { width: 7px; }
+.sidebar-top::-webkit-scrollbar-thumb { border-radius: 99px; background: #56627a; }
+
 .dashboard-brand {
   display: flex;
   align-items: center;

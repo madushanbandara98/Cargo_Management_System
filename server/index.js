@@ -318,6 +318,24 @@ function invoiceSnapshot(consignment, user) {
   };
 }
 
+async function refreshInvoiceSnapshots(consignmentId, user, current = null) {
+  const invoices = await Invoice.find({ consignment: consignmentId, status: { $ne: 'VOID' } });
+  if (!invoices.length) return;
+  const latest = current || await presentConsignment(consignmentId);
+  if (!latest) return;
+  await Promise.all(invoices.map(async invoice => {
+    const previous = invoice.snapshot || {};
+    const snapshot = invoiceSnapshot(latest, user);
+    snapshot.issuedDate = previous.issuedDate || invoice.issuedDate;
+    snapshot.dueDate = previous.dueDate || invoice.dueDate;
+    snapshot.publicUrl = previous.publicUrl || `${process.env.PUBLIC_URL || 'http://localhost:3000'}/delivery/${invoice.publicToken}`;
+    invoice.snapshot = snapshot;
+    invoice.status = latest.payment_status === 'PAID' ? 'PAID' : 'ISSUED';
+    invoice.markModified('snapshot');
+    await invoice.save();
+  }));
+}
+
 function normalizeInvoiceLinePricing(snapshot) {
   if (!Array.isArray(snapshot.items) || !snapshot.items.length) {
     throw new Error('Invoice has no delivery items. Reissue the invoice after adding the items.');
@@ -365,11 +383,48 @@ async function prepareInvoiceSnapshotForPdf(invoice) {
   const storedRate = Number(snapshot.ratePerCubic);
   const storedItems = Array.isArray(snapshot.items) ? snapshot.items : [];
   const storedLinesAreInvalid = !Number.isFinite(storedRate) || storedRate <= 0 || storedItems.some(item => !Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0);
+  const current = await presentConsignment(invoice.consignment);
+
+  // Issued invoices must use the latest Owner-approved delivery items when a
+  // corrected item was saved after the original invoice was created.
+  if (current && current.rate_per_cubic > 0 && current.items.length && current.items.every(item => item.amount > 0)) {
+    invoice.snapshot = {
+      ...snapshot,
+      items: current.items,
+      totalCubic: current.total_cubic,
+      totalItems: current.total_items,
+      ratePerCubic: current.rate_per_cubic,
+      deliveryCharge: current.delivery_charge,
+      discount: current.discount,
+      grossTotal: current.gross_total,
+      itemsTotal: current.total_amount,
+      finalTotal: current.final_total,
+      amountPaid: current.amount_paid,
+      balanceDue: current.balance_due,
+      paymentStatus: current.payment_status,
+      shipment: { name: current.shipment_name, reference: current.shipment_reference },
+      customer: {
+        ...snapshot.customer,
+        reference: current.customer_ref,
+        name: current.customer_name,
+        identity: current.customer_identity,
+        billingEmail: current.billing_email,
+        pickupContactName: current.pickup_contact_name || current.customer_name,
+        germanAddress: current.german_address,
+        deliveryContactName: current.delivery_contact_name || current.customer_name,
+        sriLankanAddress: current.sri_lankan_address,
+        phoneGermany: current.phone_de,
+        phoneSriLanka: current.phone_lk
+      }
+    };
+    invoice.markModified('snapshot');
+    await invoice.save();
+    return invoice.snapshot;
+  }
 
   // If an older invoice has an unusable line snapshot, use the same live,
   // validated consignment calculation used by the preview before rendering.
   if (storedLinesAreInvalid) {
-    const current = await presentConsignment(invoice.consignment);
     if (current && current.rate_per_cubic > 0 && current.items.length && current.items.every(item => item.amount > 0)) {
       invoice.snapshot = {
         ...snapshot,
@@ -878,8 +933,13 @@ app.get('/api/overview', requireAuth, requireAdmin, async (req, res) => {
   const paymentPartial = presented.filter(row => row.payment_status === 'PARTIALLY_PAID').length;
   const paymentUnpaid = presented.filter(row => row.payment_status === 'UNPAID').length;
   const shipmentProgress = selectedShipment ? [{ id: selectedShipment._id.toString(), name: selectedShipment.name, reference: selectedShipment.reference, customers: presented.length, delivered, pending: presented.length - delivered, status: selectedShipment.status }] : [];
+  const totalCubic = Number(presented.reduce((sum, row) => sum + row.total_cubic, 0).toFixed(3));
   const totalItems = presented.reduce((sum, row) => sum + row.total_items, 0);
   const invoiceCount = presented.filter(row => row.latest_invoice).length;
+  const cargoBreakdown = presented
+    .map(row => ({ id: row.id, customer_ref: row.customer_ref, customer_name: row.customer_name, total_cubic: row.total_cubic, total_items: row.total_items }))
+    .sort((a, b) => b.total_cubic - a.total_cubic)
+    .slice(0, 5);
   res.json({
     generated_at: new Date(),
     selected_shipment: selectedShipment ? { id: selectedShipment._id.toString(), name: selectedShipment.name, reference: selectedShipment.reference, container_number: selectedShipment.containerNumber || '', status: selectedShipment.status } : null,
@@ -888,11 +948,12 @@ app.get('/api/overview', requireAuth, requireAdmin, async (req, res) => {
       active_shipments: selectedShipment?.status === 'ACTIVE' ? 1 : 0, total_shipments: selectedShipment ? 1 : 0,
       pending_deliveries: presented.filter(row => row.delivery_status !== 'DELIVERED').length,
       delivered_deliveries: presented.filter(row => row.delivery_status === 'DELIVERED').length,
-      total_items: totalItems, invoices: invoiceCount,
+      total_cubic: totalCubic, total_items: totalItems, invoices: invoiceCount,
       payment_paid: paymentPaid, payment_partial: paymentPartial, payment_unpaid: paymentUnpaid
     },
     shipment_progress: shipmentProgress,
-    recent_activity: presented.slice(0, 6).map(row => ({ id: row.id, customer_ref: row.customer_ref, customer_name: row.customer_name, shipment_name: row.shipment_name, delivery_status: row.delivery_status, payment_status: row.payment_status, total_items: row.total_items, updated_at: row.updated_at })),
+    cargo_breakdown: cargoBreakdown,
+    recent_activity: presented.slice(0, 5).map(row => ({ id: row.id, customer_ref: row.customer_ref, customer_name: row.customer_name, shipment_name: row.shipment_name, delivery_status: row.delivery_status, payment_status: row.payment_status, total_items: row.total_items, updated_at: row.updated_at })),
     tracking_alerts: tracking.filter(row => ['DELAYED', 'ARRIVING_SOON', 'NOT_UPDATED'].includes(row.status)).map(row => presentTracking(row))
   });
 });
@@ -1396,7 +1457,9 @@ app.post('/api/consignments/:id/items', requireAuth, requireAdmin, async (req, r
       throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
     }
     await BoxItem.create({ sqliteId: await nextMongoSourceId(BoxItem), consignment: consignmentId, heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description'), createdAt: new Date() });
-    res.status(201).json(await presentConsignment(consignmentId));
+    const updated = await presentConsignment(consignmentId);
+    await refreshInvoiceSnapshots(consignmentId, req.user, updated);
+    res.status(201).json(updated);
   } catch (error) { res.status(error.message === 'Consignment not found.' ? 404 : 400).json({ error: error.message }); }
 });
 
@@ -1410,7 +1473,9 @@ app.put('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
     }
     Object.assign(item, { heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description') });
     await item.save();
-    res.json(await presentConsignment(item.consignment));
+    const updated = await presentConsignment(item.consignment);
+    await refreshInvoiceSnapshots(item.consignment, req.user, updated);
+    res.json(updated);
   } catch (error) { res.status(error.message === 'Item not found.' ? 404 : 400).json({ error: error.message }); }
 });
 
@@ -1436,7 +1501,9 @@ app.delete('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
     return res.status(409).json({ error: 'Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.' });
   }
   await item.deleteOne();
-  res.json(await presentConsignment(item.consignment));
+  const updated = await presentConsignment(item.consignment);
+  await refreshInvoiceSnapshots(item.consignment, req.user, updated);
+  res.json(updated);
 });
 
 app.get('/api/system-health', requireAuth, requireOwner, async (req, res, next) => {
