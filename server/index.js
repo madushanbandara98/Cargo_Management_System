@@ -1358,7 +1358,7 @@ app.post('/api/consignments/:id/items', requireAuth, requireAdmin, async (req, r
   try {
     const consignmentId = req.params.id;
     if (!await Consignment.exists({ _id: consignmentId })) throw new Error('Consignment not found.');
-    if (await Invoice.exists({ consignment: consignmentId, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: consignmentId, status: 'ACTIVE' })) {
+    if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: consignmentId, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: consignmentId, status: 'ACTIVE' }))) {
       throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
     }
     await BoxItem.create({ sqliteId: await nextMongoSourceId(BoxItem), consignment: consignmentId, heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description'), createdAt: new Date() });
@@ -1371,7 +1371,7 @@ app.put('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
     const itemId = req.params.id;
     const item = await BoxItem.findById(itemId);
     if (!item) throw new Error('Item not found.');
-    if (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' })) {
+    if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' }))) {
       throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
     }
     Object.assign(item, { heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description') });
@@ -1398,7 +1398,7 @@ app.delete('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) 
 app.delete('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
   const item = await BoxItem.findById(req.params.id);
   if (!item) return res.status(404).json({ error: 'Item not found.' });
-  if (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' })) {
+  if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' }))) {
     return res.status(409).json({ error: 'Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.' });
   }
   await item.deleteOne();
