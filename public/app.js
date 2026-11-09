@@ -119,6 +119,7 @@ async function dashboard() {
   window.clearReactView();
   currentUser = me.user;
   app.innerHTML = document.querySelector('#dashboard-template').innerHTML;
+  document.querySelector('#shipment-workspace').insertAdjacentHTML('beforebegin', '<section id="overview-panel" class="hidden"></section>');
   initializeBusinessSettingsPanel();
   const sidebarTop = document.querySelector('.sidebar-top');
   sidebarTop.insertAdjacentHTML('afterbegin', '<div class="dashboard-brand"><span class="dashboard-brand-mark" aria-hidden="true">CM</span><div><strong id="dashboard-business-name">Cargo Management</strong><small>Cargo management</small></div></div>');
@@ -140,6 +141,11 @@ async function dashboard() {
     showToast('Unsaved settings were reset.', 'success');
   };
   if (hasAdministratorAccess(me.user)) {
+    const overviewButton = document.createElement('button');
+    overviewButton.id = 'overview';
+    overviewButton.className = 'nav-button';
+    overviewButton.textContent = 'Overview';
+    overviewButton.onclick = () => { setActiveNavigation('overview'); showOverview(); };
     const customerButton = document.createElement('button');
     customerButton.id = 'customers';
     customerButton.className = 'nav-button';
@@ -157,6 +163,7 @@ async function dashboard() {
     const navigationSection = label => { const heading = document.createElement('span'); heading.className = 'sidebar-section-label'; heading.textContent = label; return heading; };
     sidebarNavigation.replaceChildren(
       navigationSection('Operations'),
+      overviewButton,
       document.querySelector('#current-shipment'),
       document.querySelector('#new-shipment'),
       document.querySelector('#delivery-status'),
@@ -183,7 +190,7 @@ async function dashboard() {
       document.querySelector('#administrators-panel').insertAdjacentHTML('beforebegin', '<section id="system-health-panel" class="hidden"></section>');
       systemHealthButton.onclick = () => { setActiveNavigation('system-health'); showSystemHealth(); };
     }
-    if (!document.querySelector('#sidebar-section-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="sidebar-section-styles">.sidebar-nav::before{display:none}.sidebar-section-label{display:block;margin:.9rem 0 .2rem;padding:.9rem .8rem 0;border-top:1px solid #30394a;color:#8f99aa;font-size:.66rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.sidebar-section-label:first-child{margin-top:0;padding-top:0;border-top:0}#customers::before{content:"▤"}#administrators::before{content:"♛"}#system-health::before{content:"◒"}@media(max-width:700px){.sidebar-section-label{display:none}}</style>');
+    if (!document.querySelector('#sidebar-section-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="sidebar-section-styles">.sidebar-nav::before{display:none}.sidebar-section-label{display:block;margin:.9rem 0 .2rem;padding:.9rem .8rem 0;border-top:1px solid #30394a;color:#8f99aa;font-size:.66rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.sidebar-section-label:first-child{margin-top:0;padding-top:0;border-top:0}#overview::before{content:"◈"}#customers::before{content:"▤"}#administrators::before{content:"♛"}#system-health::before{content:"◒"}@media(max-width:700px){.sidebar-section-label{display:none}}</style>');
   } else {
     document.querySelector('#new-shipment').classList.add('hidden');
     document.querySelector('#settings').classList.add('hidden');
@@ -198,10 +205,12 @@ async function dashboard() {
     }
   });
   await loadShipments();
-  setActiveNavigation('current-shipment');
+  if (hasAdministratorAccess(me.user)) { setActiveNavigation('overview'); showOverview(); }
+  else { setActiveNavigation('current-shipment'); showCurrentShipments(); }
 }
 
 function setActiveNavigation(id) {
+  if (id !== 'overview') document.querySelector('#overview-panel')?.classList.add('hidden');
   if (id !== 'system-health') document.querySelector('#system-health-panel')?.classList.add('hidden');
   document.querySelectorAll('.sidebar-nav .nav-button').forEach(button => {
     const active = button.id === id;
@@ -536,7 +545,58 @@ function enableCustomerEnterNavigation(form) {
   });
 }
 
+async function showOverview(shipmentId = '') {
+  stopDeliveryStatusRefresh();
+  document.querySelector('#overview-panel').classList.remove('hidden');
+  document.querySelector('#shipment-workspace').classList.add('hidden');
+  document.querySelector('#settings-panel').classList.add('hidden');
+  document.querySelector('#employees-panel').classList.add('hidden');
+  document.querySelector('#tracking-panel').classList.add('hidden');
+  document.querySelector('#delivery-status-panel')?.classList.add('hidden');
+  document.querySelector('#customers-panel')?.classList.add('hidden');
+  document.querySelector('#administrators-panel')?.classList.add('hidden');
+  const panel = document.querySelector('#overview-panel');
+  panel.innerHTML = '<section class="card overview-loading">Loading your operations overview…</section>';
+  try {
+    const data = await api(`/api/overview${shipmentId ? `?shipmentId=${encodeURIComponent(shipmentId)}` : ''}`);
+    const m = data.metrics;
+    const money = value => new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(Number(value || 0));
+    const statusLabel = value => value === 'DELIVERED' ? 'Delivered' : value === 'DELAYED' ? 'Delayed' : value === 'ARRIVING_SOON' ? 'Arriving soon' : value === 'IN_TRANSIT' ? 'In transit' : 'Not updated';
+    const statusClass = value => String(value || '').toLowerCase().replace('_', '-');
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    const operatorName = currentUser?.full_name || currentUser?.username || 'there';
+    const totalDeliveries = m.delivered_deliveries + m.pending_deliveries;
+    const deliveredPercent = totalDeliveries ? Math.round(m.delivered_deliveries / totalDeliveries * 100) : 0;
+    const deliveredAngle = deliveredPercent * 3.6;
+    const paymentPaid = Number(m.payment_paid || 0);
+    const paymentPartial = Number(m.payment_partial || 0);
+    const paymentUnpaid = Number(m.payment_unpaid || 0);
+    const paymentTotal = paymentPaid + paymentPartial + paymentUnpaid;
+    const paymentPercent = value => paymentTotal ? Math.round(value / paymentTotal * 100) : 0;
+    const shipmentOptions = data.shipment_options || [];
+    panel.innerHTML = `<style>
+      .overview-page{max-width:1400px;margin:0 auto;padding:1.5rem;background:#f7f8fb}.overview-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1.25rem}.overview-heading h2{margin:0;color:#202838;font-size:1.65rem}.overview-heading p{margin:.35rem 0 0;color:#687086}.overview-actions{display:flex;gap:.6rem;flex-wrap:wrap}.overview-actions button{padding:.65rem .8rem;border:1px solid #cbd1dc;border-radius:8px;background:#fff;color:#202838;font-weight:700}.overview-actions button.primary{border-color:#cbb400;background:#f0d405}.overview-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem;margin-bottom:1rem}.overview-metric{padding:1rem 1.1rem;border:1px solid #e2e7ed;border-radius:12px;background:#fff;box-shadow:0 3px 14px #2530470b}.overview-metric small,.overview-metric strong{display:block}.overview-metric small{color:#687086;font-size:.76rem}.overview-metric strong{margin-top:.35rem;color:#202838;font-size:1.55rem}.overview-metric span{display:block;margin-top:.35rem;color:#38815d;font-size:.72rem;font-weight:700}.overview-grid{display:grid;grid-template-columns:1.35fr .95fr;gap:1rem}.overview-card{min-width:0;border:1px solid #e2e7ed;border-radius:12px;background:#fff;box-shadow:0 3px 14px #2530470b}.overview-card.wide{grid-column:1/-1}.overview-card-head{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:1rem 1.1rem;border-bottom:1px solid #edf0f3}.overview-card-head h3{margin:0;color:#202838;font-size:1rem}.overview-card-head span{color:#687086;font-size:.74rem}.overview-card-body{padding:1rem 1.1rem}.overview-progress-row{display:grid;grid-template-columns:minmax(120px,1fr) 2fr auto;align-items:center;gap:.8rem;padding:.75rem 0;border-bottom:1px solid #edf0f3}.overview-progress-row:last-child{border-bottom:0}.overview-progress-row strong,.overview-progress-row small{display:block}.overview-progress-row small{margin-top:.2rem;color:#687086;font-size:.72rem}.overview-progress{height:8px;overflow:hidden;border-radius:99px;background:#edf0f3}.overview-progress span{display:block;height:100%;border-radius:inherit;background:#35a975}.overview-progress-row em{color:#687086;font-size:.72rem;font-style:normal;white-space:nowrap}.overview-chart-layout{display:flex;align-items:center;justify-content:center;gap:1.6rem;min-height:190px}.overview-donut{display:grid;place-items:center;width:150px;height:150px;border-radius:50%;background:conic-gradient(#35a975 0deg var(--delivered-angle),#f0d405 var(--delivered-angle) 360deg);position:relative;flex:0 0 auto}.overview-donut::after{content:"";position:absolute;width:102px;height:102px;border-radius:50%;background:#fff}.overview-donut-label{z-index:1;text-align:center}.overview-donut-label strong,.overview-donut-label small{display:block}.overview-donut-label strong{color:#202838;font-size:1.65rem}.overview-donut-label small{color:#687086;font-size:.7rem}.overview-chart-legend{display:grid;gap:.85rem;min-width:145px}.overview-legend-item{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:.5rem;color:#687086;font-size:.76rem}.overview-legend-dot{width:10px;height:10px;border-radius:50%;background:#35a975}.overview-legend-dot.pending{background:#f0d405}.overview-legend-item strong{color:#202838}.overview-activity{display:grid;gap:.65rem}.overview-activity-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.65rem 0;border-bottom:1px solid #edf0f3}.overview-activity-row:last-child{border-bottom:0}.overview-activity-row strong,.overview-activity-row small{display:block}.overview-activity-row small{margin-top:.2rem;color:#687086;font-size:.72rem}.overview-badge{padding:.3rem .5rem;border-radius:999px;color:#286b4d;background:#e8f7ee;font-size:.68rem;font-weight:800;white-space:nowrap}.overview-badge.pending{color:#936111;background:#fff3d9}.overview-badge.paid{color:#286b4d;background:#e8f7ee}.overview-badge.partial{color:#2865a1;background:#e7f1fb}.overview-alert{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.7rem 0;border-bottom:1px solid #edf0f3}.overview-alert:last-child{border-bottom:0}.overview-alert strong,.overview-alert small{display:block}.overview-alert small{margin-top:.2rem;color:#687086;font-size:.72rem}.overview-empty{padding:.8rem 0;color:#687086;font-size:.8rem}.overview-loading{margin:1.5rem}.overview-page .delayed{color:#a52a22;background:#fdeceb}.overview-page .arriving-soon{color:#936111;background:#fff3d9}.overview-page .not-updated{color:#687086;background:#edf0f3}@media(max-width:1000px){.overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-grid{grid-template-columns:1fr}}@media(max-width:600px){.overview-page{padding:1rem}.overview-heading{flex-direction:column}.overview-metrics{grid-template-columns:1fr}.overview-progress-row{grid-template-columns:1fr;gap:.35rem}.overview-chart-layout{flex-direction:column;gap:1rem}}
+    </style><main class="overview-page"><header class="overview-heading"><div><h2>${greeting}, ${escapeHtml(operatorName)}</h2><p>Here is your latest cargo activity.</p></div><div class="overview-actions"><button type="button" data-overview-action="customer">+ Add customer</button><button type="button" class="primary" data-overview-action="shipment">+ New shipment</button></div></header><section class="overview-metrics"><article class="overview-metric"><small>Active shipments</small><strong>${m.active_shipments}</strong><span>${m.total_shipments} total shipments</span></article><article class="overview-metric"><small>Customers</small><strong>${m.customers}</strong><span>${m.total_items} items recorded</span></article><article class="overview-metric"><small>Pending deliveries</small><strong>${m.pending_deliveries}</strong><span>${m.delivered_deliveries} delivered</span></article><article class="overview-metric"><small>Outstanding balance</small><strong>${money(m.outstanding)}</strong><span>${money(m.total_paid)} paid so far</span></article></section><section class="overview-grid"><article class="overview-card"><div class="overview-card-head"><h3>Shipment progress</h3><span>${data.shipment_progress.length} active shipments</span></div><div class="overview-card-body">${data.shipment_progress.map(row => { const percent = row.customers ? Math.round(row.delivered / row.customers * 100) : 0; return `<div class="overview-progress-row"><div><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.reference)} · ${row.customers} customers</small></div><div class="overview-progress" role="progressbar" aria-label="${escapeHtml(row.name)} delivery progress" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><span style="width:${percent}%"></span></div><em>${row.delivered}/${row.customers} delivered</em></div>`; }).join('') || '<div class="overview-empty">No active shipments yet.</div>'}</div></article><article class="overview-card"><div class="overview-card-head"><h3>Recent activity</h3><span>Latest updates</span></div><div class="overview-card-body overview-activity">${data.recent_activity.map(row => `<div class="overview-activity-row"><div><strong>${escapeHtml(row.customer_ref)} · ${escapeHtml(row.customer_name)}</strong><small>${escapeHtml(row.shipment_name)} · ${row.total_items} items</small></div><span class="overview-badge ${row.payment_status === 'PAID' ? 'paid' : row.payment_status === 'PARTIALLY_PAID' ? 'partial' : 'pending'}">${row.payment_status === 'PAID' ? 'Paid' : row.payment_status === 'PARTIALLY_PAID' ? 'Part paid' : 'Payment due'}</span></div>`).join('') || '<div class="overview-empty">No customer activity yet.</div>'}</div></article><article class="overview-card wide"><div class="overview-card-head"><h3>Tracking alerts</h3><span>Review before dispatch</span></div><div class="overview-card-body">${data.tracking_alerts.map(row => `<div class="overview-alert"><div><strong>${escapeHtml(row.container_number)} · ${escapeHtml(row.carrier)}</strong><small>${escapeHtml(row.origin || 'Origin not set')} → ${escapeHtml(row.destination || 'Destination not set')}</small></div><span class="overview-badge ${statusClass(row.status)}">${statusLabel(row.status)}</span></div>`).join('') || '<div class="overview-empty">No tracking alerts. All tracked shipments are up to date.</div>'}</div></article></section></main>`;
+    panel.querySelector('style').textContent += '.overview-container-picker{display:flex;align-items:center;gap:.55rem;padding:.55rem .75rem;border:1px solid #d8dee8;border-radius:10px;background:#fff;color:#687086;font-size:.72rem;font-weight:800}.overview-container-picker select{max-width:220px;border:0;background:transparent;color:#202838;font:inherit;outline:0;cursor:pointer}.overview-container-picker option{font-weight:600}.overview-heading .overview-actions{align-items:center}.overview-payment-chart{display:grid;gap:.9rem}.overview-payment-row{display:grid;grid-template-columns:105px 1fr 30px;align-items:center;gap:.65rem;color:#687086;font-size:.75rem}.overview-payment-track{height:9px;overflow:hidden;border-radius:99px;background:#edf0f3}.overview-payment-track span{display:block;height:100%;border-radius:inherit}.overview-payment-track .paid{background:#35a975}.overview-payment-track .partial{background:#4e91d9}.overview-payment-track .unpaid{background:#f0d405}.overview-payment-row strong{color:#202838;text-align:right}';
+    const picker = document.createElement('label');
+    picker.className = 'overview-container-picker';
+    picker.innerHTML = `<span>Container</span><select aria-label="Select container">${shipmentOptions.map(option => `<option value="${escapeHtml(option.id)}" ${data.selected_shipment?.id === option.id ? 'selected' : ''}>${escapeHtml(option.name)} · ${escapeHtml(option.reference)}</option>`).join('') || '<option value="">No containers</option>'}</select>`;
+    panel.querySelector('.overview-actions').prepend(picker);
+    picker.querySelector('select').onchange = event => showOverview(event.target.value);
+    const metricCards = panel.querySelector('.overview-metrics');
+    metricCards.innerHTML = `<article class="overview-metric"><small>Container status</small><strong>${data.selected_shipment?.status || '—'}</strong><span>${escapeHtml(data.selected_shipment?.reference || 'No container selected')}</span></article><article class="overview-metric"><small>Pending deliveries</small><strong>${m.pending_deliveries}</strong><span>${m.delivered_deliveries} delivered</span></article><article class="overview-metric"><small>Items recorded</small><strong>${m.total_items}</strong><span>Across this container</span></article><article class="overview-metric"><small>Invoices issued</small><strong>${m.invoices}</strong><span>Customer documents</span></article>`;
+    panel.querySelector('.overview-grid').firstElementChild.insertAdjacentHTML('beforebegin', `<article class="overview-card"><div class="overview-card-head"><h3>Delivery overview</h3><span>${deliveredPercent}% delivered</span></div><div class="overview-card-body overview-chart-layout"><div class="overview-donut" style="--delivered-angle:${deliveredAngle}deg"><div class="overview-donut-label"><strong>${deliveredPercent}%</strong><small>delivered</small></div></div><div class="overview-chart-legend"><div class="overview-legend-item"><span class="overview-legend-dot"></span><span>Delivered</span><strong>${m.delivered_deliveries}</strong></div><div class="overview-legend-item"><span class="overview-legend-dot pending"></span><span>Pending</span><strong>${m.pending_deliveries}</strong></div><div class="overview-legend-item"><span></span><span>Total deliveries</span><strong>${totalDeliveries}</strong></div></div></div></article>`);
+    const shipmentHeading = panel.querySelectorAll('.overview-card-head span')[1];
+    if (shipmentHeading) shipmentHeading.textContent = data.selected_shipment?.name || 'No container selected';
+    panel.querySelector('.overview-grid').children[2]?.insertAdjacentHTML('afterend', `<article class="overview-card"><div class="overview-card-head"><h3>Payment status</h3><span>${paymentTotal} customer deliveries</span></div><div class="overview-card-body overview-payment-chart"><div class="overview-payment-row"><span>Paid</span><div class="overview-payment-track"><span class="paid" style="width:${paymentPercent(paymentPaid)}%"></span></div><strong>${paymentPaid}</strong></div><div class="overview-payment-row"><span>Part paid</span><div class="overview-payment-track"><span class="partial" style="width:${paymentPercent(paymentPartial)}%"></span></div><strong>${paymentPartial}</strong></div><div class="overview-payment-row"><span>Unpaid</span><div class="overview-payment-track"><span class="unpaid" style="width:${paymentPercent(paymentUnpaid)}%"></span></div><strong>${paymentUnpaid}</strong></div></div></article>`);
+    panel.querySelector('[data-overview-action="shipment"]').onclick = () => { setActiveNavigation('new-shipment'); showNewShipmentForm(); };
+    panel.querySelector('[data-overview-action="customer"]').onclick = () => { setActiveNavigation('customers'); showCustomerDirectory(); };
+  } catch (error) { panel.innerHTML = `<section class="card overview-loading"><p class="error">${escapeHtml(error.message)}</p><button type="button" id="retry-overview">Retry</button></section>`; panel.querySelector('#retry-overview').onclick = showOverview; }
+}
+
 function showShipmentWorkspace() {
+  document.querySelector('#overview-panel')?.classList.add('hidden');
   stopDeliveryStatusRefresh();
   document.querySelector('#settings-panel').classList.add('hidden');
   document.querySelector('#employees-panel').classList.add('hidden');

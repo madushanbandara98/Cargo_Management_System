@@ -863,6 +863,40 @@ app.get('/api/shipments', requireAuth, async (req, res) => {
   res.json(shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, ...(administratorAccess ? { container_number: row.containerNumber || '' } : {}), status: row.status, created_at: row.createdAt, created_by: row.createdBy.toString(), consignment_count: countMap.get(row._id.toString()) || 0 })));
 });
 
+app.get('/api/overview', requireAuth, requireAdmin, async (req, res) => {
+  const shipments = await Container.find().sort({ createdAt: -1 }).lean();
+  const requestedShipment = String(req.query.shipmentId || '').trim();
+  const selectedShipment = shipments.find(row => row._id.toString() === requestedShipment) || shipments[0] || null;
+  const shipmentFilter = selectedShipment ? { container: selectedShipment._id } : { container: null };
+  const [consignments, tracking] = await Promise.all([
+    Consignment.find(shipmentFilter).sort({ updatedAt: -1 }).limit(100).select('_id').lean(),
+    selectedShipment?.containerNumber ? ShipmentTracking.find({ containerNumber: selectedShipment.containerNumber }).sort({ updatedAt: -1 }).limit(8).lean() : []
+  ]);
+  const presented = (await Promise.all(consignments.map(row => presentConsignment(row._id)))).filter(Boolean);
+  const delivered = presented.filter(row => row.delivery_status === 'DELIVERED').length;
+  const paymentPaid = presented.filter(row => row.payment_status === 'PAID').length;
+  const paymentPartial = presented.filter(row => row.payment_status === 'PARTIALLY_PAID').length;
+  const paymentUnpaid = presented.filter(row => row.payment_status === 'UNPAID').length;
+  const shipmentProgress = selectedShipment ? [{ id: selectedShipment._id.toString(), name: selectedShipment.name, reference: selectedShipment.reference, customers: presented.length, delivered, pending: presented.length - delivered, status: selectedShipment.status }] : [];
+  const totalItems = presented.reduce((sum, row) => sum + row.total_items, 0);
+  const invoiceCount = presented.filter(row => row.latest_invoice).length;
+  res.json({
+    generated_at: new Date(),
+    selected_shipment: selectedShipment ? { id: selectedShipment._id.toString(), name: selectedShipment.name, reference: selectedShipment.reference, container_number: selectedShipment.containerNumber || '', status: selectedShipment.status } : null,
+    shipment_options: shipments.map(row => ({ id: row._id.toString(), name: row.name, reference: row.reference, container_number: row.containerNumber || '', status: row.status, created_at: row.createdAt })),
+    metrics: {
+      active_shipments: selectedShipment?.status === 'ACTIVE' ? 1 : 0, total_shipments: selectedShipment ? 1 : 0,
+      pending_deliveries: presented.filter(row => row.delivery_status !== 'DELIVERED').length,
+      delivered_deliveries: presented.filter(row => row.delivery_status === 'DELIVERED').length,
+      total_items: totalItems, invoices: invoiceCount,
+      payment_paid: paymentPaid, payment_partial: paymentPartial, payment_unpaid: paymentUnpaid
+    },
+    shipment_progress: shipmentProgress,
+    recent_activity: presented.slice(0, 6).map(row => ({ id: row.id, customer_ref: row.customer_ref, customer_name: row.customer_name, shipment_name: row.shipment_name, delivery_status: row.delivery_status, payment_status: row.payment_status, total_items: row.total_items, updated_at: row.updated_at })),
+    tracking_alerts: tracking.filter(row => ['DELAYED', 'ARRIVING_SOON', 'NOT_UPDATED'].includes(row.status)).map(row => presentTracking(row))
+  });
+});
+
 app.get('/api/customers/by-reference/:reference', requireAuth, requireAdmin, async (req, res) => {
   const customer = await Customer.findOne({ customerRef: String(req.params.reference).trim() }).lean();
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
