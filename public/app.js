@@ -371,9 +371,31 @@ async function openShipment(shipment, pushHistory = true) {
   enableCustomerEnterNavigation(panel.querySelector('#consignment-form'));
   panel.querySelector('#consignment-form').addEventListener('submit', async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); values.allItemsEntered = Boolean(event.currentTarget.elements.allItemsEntered?.checked); const wasNewCustomer = !activeConsignment; try { activeConsignment = await api(`/api/shipments/${shipment.id}/consignments`, { method: 'POST', body: JSON.stringify(values) }); while (draftItems.length) { activeConsignment = await api(`/api/consignments/${activeConsignment.id}/items`, { method: 'POST', body: JSON.stringify(draftItems[0]) }); draftItems.shift(); } editingDraftItemIndex = null; renderItems(); await refreshSavedCustomers(panel, shipment); showToast(`${activeConsignment.customer_ref} — ${activeConsignment.customer_name} ${wasNewCustomer ? 'saved' : 'updated'} successfully.`); } catch (error) { message(event.currentTarget, error.message); } });
   panel.querySelector('#customer-search')?.addEventListener('input', event => { const query = event.currentTarget.value.trim().toLowerCase(); panel.querySelectorAll('.customer-row').forEach(row => row.classList.toggle('hidden', !row.dataset.customerSearch.includes(query))); });
+  setupCustomerPaymentFilter(panel.querySelector('.saved-customers'), consignments);
   panel.querySelectorAll('[data-consignment]').forEach(button => button.onclick = async () => { draftItems = []; editingDraftItemIndex = null; activeConsignment = await api(`/api/consignments/${button.dataset.consignment}`); fillForm(activeConsignment); renderItems(); panel.querySelector('.saved-customers')?.classList.remove('is-open'); panel.querySelector('#customer-list-panel')?.removeAttribute('open'); });
   panel.querySelectorAll('[data-remove-consignment]').forEach(button => button.onclick = () => showRemoveCustomerDialog(button.dataset.removeConsignment, button.dataset.customerRef));
   panel.querySelector('#new-customer').onclick = () => { activeConsignment = null; updateCustomerSwitcher(null); draftItems = []; editingDraftItemIndex = null; panel.querySelector('.saved-customers')?.classList.remove('is-open'); panel.querySelector('#consignment-form').reset(); panel.querySelector('#consignment-form').elements.ratePerCubic.value = '530'; panel.querySelector('#item-editor').innerHTML = '<p class="item-empty-state">Add delivery items before saving the customer.</p>'; showDraftItemStarter(panel); renderDocumentActions(); };
+}
+
+function setupCustomerPaymentFilter(section, consignments) {
+  const content = section?.querySelector('.customer-list-content');
+  if (!content) return;
+  if (!document.querySelector('#customer-payment-filter-styles')) document.head.insertAdjacentHTML('beforeend', '<style id="customer-payment-filter-styles">.customer-payment-filter{display:grid;gap:.35rem;margin:0 0 .75rem;font-size:.85rem}.customer-payment-filter select{width:100%;padding:.65rem;border:1px solid #d9dde5;border-radius:7px;background:#fff;font:inherit;font-weight:600;color:#202838}.customer-row.hidden{display:none!important}</style>');
+  const filter = document.createElement('label');
+  filter.className = 'customer-payment-filter';
+  filter.innerHTML = '<span>Payment status</span><select aria-label="Filter customers by payment status"><option value="ALL">All</option><option value="PAID">Paid</option><option value="UNPAID">Unpaid</option><option value="PARTIALLY_PAID">Partially paid</option></select>';
+  content.prepend(filter);
+  section.querySelectorAll('.customer-row').forEach(row => {
+    const consignment = consignments.find(item => item.id === row.querySelector('[data-consignment]')?.dataset.consignment);
+    row.dataset.paymentStatus = consignment?.payment_status || 'UNPAID';
+  });
+  const apply = () => {
+    const query = section.querySelector('#customer-search')?.value.trim().toLowerCase() || '';
+    const paymentStatus = filter.querySelector('select').value;
+    section.querySelectorAll('.customer-row').forEach(row => row.classList.toggle('hidden', Boolean(query && !row.dataset.customerSearch.includes(query)) || (paymentStatus !== 'ALL' && row.dataset.paymentStatus !== paymentStatus)));
+  };
+  filter.querySelector('select').addEventListener('change', apply);
+  section.querySelector('#customer-search')?.addEventListener('input', apply);
 }
 
 function showDraftItemStarter(panel) {
@@ -387,6 +409,7 @@ async function refreshSavedCustomers(panel, shipment) {
   const consignments = await api(`/api/shipments/${shipment.id}/consignments`);
   const section = panel.querySelector('.saved-customers');
   section.innerHTML = `<div class="customer-drawer-heading"><h3>Choose customer</h3><button type="button" class="customer-drawer-close" aria-label="Close customer list">×</button></div><div id="consignments">${consignments.length ? `<details id="customer-list-panel" class="customer-list-panel" open><summary><span>Customer list <span class="customer-count">${consignments.length}</span></span><span class="list-chevron" aria-hidden="true">⌄</span></summary><div class="customer-list-content"><label class="customer-search">Search customers<input id="customer-search" type="search" placeholder="Reference or name"></label><div class="customer-list">${consignments.map(c => `<div class="customer-row" data-customer-search="${escapeHtml(`${c.customer_ref} ${c.customer_name}`.toLowerCase())}"><button type="button" class="customer-load" data-consignment="${c.id}"><span><strong>${escapeHtml(c.customer_ref)} — ${escapeHtml(c.customer_name)}</strong><small>Load customer delivery</small></span><span class="load-arrow" aria-hidden="true">›</span></button><details class="customer-menu"><summary aria-label="Actions for ${escapeHtml(c.customer_ref)}">⋮</summary><button type="button" data-remove-consignment="${c.id}" data-customer-ref="${escapeHtml(c.customer_ref)}">Remove from shipment</button></details></div>`).join('')}</div></div></details>` : '<p>No customers added yet.</p>'}</div>`;
+  setupCustomerPaymentFilter(section, consignments);
   section.querySelector('.customer-drawer-close').onclick = () => section.classList.remove('is-open');
   section.querySelector('#customer-list-panel')?.removeAttribute('open');
   section.querySelector('#customer-search')?.addEventListener('input', event => {

@@ -1069,11 +1069,11 @@ app.get('/api/shipments/:shipmentId/consignments', requireAuth, async (req, res)
     return res.status(404).json({ error: 'Shipment not found.' });
   }
   const rows = await Consignment.find({ container: req.params.shipmentId }).populate('customer deliveredBy').sort({ deliveryStatus: -1, updatedAt: -1 }).lean();
-  res.json(rows.map(row => ({
-    id: row._id.toString(), customer_ref: row.customer.customerRef, customer_name: row.customer.name,
-    delivery_status: row.deliveryStatus || 'PENDING', delivered_at: row.deliveredAt || null,
-    delivered_by: row.deliveredBy ? { id: row.deliveredBy._id.toString(), username: row.deliveredBy.username, full_name: row.deliveredBy.fullName } : null,
-    updated_at: row.updatedAt
+  const presented = await Promise.all(rows.map(row => presentConsignment(row._id)));
+  res.json(presented.filter(Boolean).map(row => ({
+    id: row.id, customer_ref: row.customer_ref, customer_name: row.customer_name,
+    payment_status: row.payment_status, delivery_status: row.delivery_status,
+    delivered_at: row.delivered_at, delivered_by: row.delivered_by, updated_at: row.updated_at
   })));
 });
 
