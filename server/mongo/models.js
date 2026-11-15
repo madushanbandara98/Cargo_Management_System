@@ -82,6 +82,7 @@ const boxItemSchema = new Schema({
   widthCm: { type: Number, required: true, min: 0 },
   depthCm: { type: Number, required: true, min: 0 },
   quantity: { type: Number, required: true, min: 1 },
+  ratePerCubic: { type: Number, default: null, min: 0 },
   description: { type: String, default: '' },
   createdAt: { type: Date, required: true }
 }, { versionKey: false });

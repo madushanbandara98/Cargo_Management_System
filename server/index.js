@@ -223,7 +223,8 @@ async function presentConsignment(id) {
   const rawItems = await BoxItem.find({ consignment: summary._id }).sort({ createdAt: 1, _id: 1 }).lean();
   const items = rawItems.map(item => {
     const cubic = item.heightCm * item.widthCm * item.depthCm / 1_000_000;
-    return { id: item._id.toString(), height_cm: item.heightCm, width_cm: item.widthCm, depth_cm: item.depthCm, quantity: item.quantity, description: item.description, cubic_per_item: Number(cubic.toFixed(3)), amount: Number((cubic * item.quantity * summary.ratePerCubic).toFixed(2)) };
+    const rate = item.ratePerCubic ?? summary.ratePerCubic;
+    return { id: item._id.toString(), height_cm: item.heightCm, width_cm: item.widthCm, depth_cm: item.depthCm, quantity: item.quantity, rate_per_cubic: rate, description: item.description, cubic_per_item: Number(cubic.toFixed(3)), amount: Number((cubic * item.quantity * rate).toFixed(2)) };
   });
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const totalCubic = items.reduce((sum, item) => sum + (item.height_cm * item.width_cm * item.depth_cm / 1_000_000 * item.quantity), 0);
@@ -365,13 +366,15 @@ function normalizeInvoiceLinePricing(snapshot) {
   const normalizedItems = items.map(item => {
     const cubic = Number(item.height_cm) * Number(item.width_cm) * Number(item.depth_cm) / 1_000_000;
     const quantity = Number(item.quantity);
+    const itemRate = Number(item.rate_per_cubic);
+    const effectiveRate = Number.isFinite(itemRate) && itemRate >= 0 ? itemRate : rate;
     if (!Number.isFinite(cubic) || cubic < 0 || !Number.isFinite(quantity) || quantity < 1) {
       throw new Error('Invoice contains an invalid delivery item. Correct the consignment and reissue the invoice.');
     }
-    const amount = Number((cubic * quantity * rate).toFixed(2));
+    const amount = Number((cubic * quantity * effectiveRate).toFixed(2));
     const cubicPerItem = Number(cubic.toFixed(3));
-    if (Number(item.amount) !== amount || Number(item.cubic_per_item) !== cubicPerItem) repaired = true;
-    return { ...item, cubic_per_item: cubicPerItem, amount };
+    if (Number(item.amount) !== amount || Number(item.cubic_per_item) !== cubicPerItem || Number(item.rate_per_cubic) !== effectiveRate) repaired = true;
+    return { ...item, rate_per_cubic: effectiveRate, cubic_per_item: cubicPerItem, amount };
   });
 
   if (Number(snapshot.ratePerCubic) !== rate) repaired = true;
@@ -532,7 +535,7 @@ export async function createInvoicePdf(invoice, baseUrl = '') {
       document.text(`${item.height_cm} × ${item.width_cm} × ${item.depth_cm}`, columns[2] + 4, y + 9, { width: 85 });
       document.text(String(item.quantity), columns[3] + 4, y + 9, { width: 36, align: 'right' });
       document.text((Number(item.cubic_per_item) * Number(item.quantity)).toFixed(3), columns[4] + 4, y + 9, { width: 51, align: 'right' });
-      document.text(money(snapshot.ratePerCubic), columns[5] + 4, y + 9, { width: 60, align: 'right' });
+    document.text(money(item.rate_per_cubic ?? snapshot.ratePerCubic), columns[5] + 4, y + 9, { width: 60, align: 'right' });
       document.text(money(item.amount), columns[6] + 4, y + 9, { width: 78, align: 'right' });
       y += rowHeight;
     });
@@ -1453,10 +1456,11 @@ app.post('/api/consignments/:id/items', requireAuth, requireAdmin, async (req, r
   try {
     const consignmentId = req.params.id;
     if (!await Consignment.exists({ _id: consignmentId })) throw new Error('Consignment not found.');
-    if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: consignmentId, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: consignmentId, status: 'ACTIVE' }))) {
-      throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
-    }
-    await BoxItem.create({ sqliteId: await nextMongoSourceId(BoxItem), consignment: consignmentId, heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description'), createdAt: new Date() });
+    // Administrators may correct delivery items after an invoice or payment exists.
+    // The invoice snapshot is refreshed below so the correction is reflected in
+    // the current invoice and the recalculated consignment totals.
+    const ratePerCubic = req.body.ratePerCubic === '' || req.body.ratePerCubic == null ? null : number(req.body.ratePerCubic, 'Rate per cubic metre', { min: 0 });
+    await BoxItem.create({ sqliteId: await nextMongoSourceId(BoxItem), consignment: consignmentId, heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), ratePerCubic, description: text(req.body.description, 'Description'), createdAt: new Date() });
     const updated = await presentConsignment(consignmentId);
     await refreshInvoiceSnapshots(consignmentId, req.user, updated);
     res.status(201).json(updated);
@@ -1468,10 +1472,8 @@ app.put('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
     const itemId = req.params.id;
     const item = await BoxItem.findById(itemId);
     if (!item) throw new Error('Item not found.');
-    if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' }))) {
-      throw new Error('Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.');
-    }
-    Object.assign(item, { heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), description: text(req.body.description, 'Description') });
+    const ratePerCubic = req.body.ratePerCubic === '' || req.body.ratePerCubic == null ? null : number(req.body.ratePerCubic, 'Rate per cubic metre', { min: 0 });
+    Object.assign(item, { heightCm: number(req.body.height, 'Height', { min: Number.EPSILON }), widthCm: number(req.body.width, 'Width', { min: Number.EPSILON }), depthCm: number(req.body.depth, 'Depth', { min: Number.EPSILON }), quantity: number(req.body.quantity, 'Quantity', { min: 1, integer: true }), ratePerCubic, description: text(req.body.description, 'Description') });
     await item.save();
     const updated = await presentConsignment(item.consignment);
     await refreshInvoiceSnapshots(item.consignment, req.user, updated);
@@ -1497,9 +1499,6 @@ app.delete('/api/consignments/:id', requireAuth, requireAdmin, async (req, res) 
 app.delete('/api/items/:id', requireAuth, requireAdmin, async (req, res) => {
   const item = await BoxItem.findById(req.params.id);
   if (!item) return res.status(404).json({ error: 'Item not found.' });
-  if (req.user.role !== 'OWNER' && (await Invoice.exists({ consignment: item.consignment, status: { $ne: 'VOID' } }) || await Payment.exists({ consignment: item.consignment, status: 'ACTIVE' }))) {
-    return res.status(409).json({ error: 'Delivery items cannot be changed after an invoice or payment exists. Void and reissue the invoice instead.' });
-  }
   await item.deleteOne();
   const updated = await presentConsignment(item.consignment);
   await refreshInvoiceSnapshots(item.consignment, req.user, updated);
