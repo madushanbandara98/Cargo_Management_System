@@ -1708,7 +1708,7 @@ function showVoidPaymentDialog(payment, consignment) {
 }
 
 function enableItemEnterNavigation(form) {
-  const fields = ['height', 'width', 'depth', 'quantity', 'description'].map(name => form.elements[name]);
+  const fields = ['height', 'width', 'depth', 'quantity', 'ratePerCubic', 'description'].map(name => form.elements[name]).filter(Boolean);
   const submitButton = form.querySelector('button:not([type="button"])');
   form.addEventListener('keydown', event => {
     if (!fields.includes(event.target)) return;
